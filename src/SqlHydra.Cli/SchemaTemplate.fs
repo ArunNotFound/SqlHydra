@@ -242,7 +242,7 @@ let buildGetOrdinal tableType =
             for table in allTables do
                 let schemaTable = $"{table.Schema}.{table.Name}"
                 let readerClassName = $"{table.Name}Reader"
-                $"member __.{backticks schemaTable} = {backticks table.Schema}.Readers.{backticks readerClassName}(reader, buildGetOrdinal typeof<{backticks table.Schema}.{table.Name}>)"
+                $"member __.{backticks schemaTable} = {backticks table.Schema}.Readers.{backticks readerClassName}(reader, buildGetOrdinal typeof<{backticks table.Schema}.{backticks table.Name}>)"
 
             newLine
 
