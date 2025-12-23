@@ -869,7 +869,7 @@ let visitPropertySelector<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Pro
 type Selection =
     | SelectedTable of tableAlias: string * tableType: Type
     | SelectedColumn of tableAlias: string * column: string * columnType: Type * isOpt: bool * isNullable: bool
-    | SelectedAggregateColumn of aggregateType: string * tableAlias: string * column: string
+    | SelectedExpression of sqlFragment: string
 
 /// Returns a list of one or more fully qualified table names: ["{schema}.{table}"]
 let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
@@ -882,9 +882,36 @@ let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
         | MethodCall m when m.Method.Name = "Some" ->
             // Columns selected from leftJoined tables may be wrapped in `Some` to make them optional.
             visit m.Arguments.[0]
-        | AggregateColumn (aggType, (p, _)) -> 
+        | AggregateColumn (aggType, (p, _)) ->
             let alias = visitAlias p.Expression
-            [ SelectedAggregateColumn (aggType, alias, p.Member.Name) ]            
+            let fqCol = $"{{%s{alias}}}.{{%s{p.Member.Name}}}"
+            [ SelectedExpression $"{aggType}({fqCol})" ]
+        | MethodCall m ->
+            // Treat any other method call as a SQL function
+            let fnName = m.Method.Name
+            let args =
+                m.Arguments
+                |> Seq.map (fun arg ->
+                    match arg with
+                    | Member mem ->
+                        let alias = visitAlias mem.Expression
+                        $"{{%s{alias}}}.{{%s{mem.Member.Name}}}"
+                    | Constant c when c.Value = null ->
+                        "NULL"
+                    | Constant c when c.Type = typeof<string> ->
+                        $"'{c.Value}'"
+                    | Constant c ->
+                        sprintf "%O" c.Value
+                    | MethodCall _ as nested ->
+                        // Handle nested function calls
+                        match visit nested with
+                        | [ SelectedExpression sql ] -> sql
+                        | _ -> notImplMsg $"Unsupported nested expression in function argument."
+                    | _ ->
+                        notImplMsg $"Unsupported argument type in SQL function: {arg.NodeType}"
+                )
+                |> String.concat ", "
+            [ SelectedExpression $"{fnName}({args})" ]
         | New n -> 
             // Handle a tuple of multiple tables
             n.Arguments 

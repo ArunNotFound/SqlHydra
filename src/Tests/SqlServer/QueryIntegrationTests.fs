@@ -1109,7 +1109,7 @@ let ``DiffService Save`` () = task {
 
 [<Test>]
 let ``Multiple Joins Same Table`` () = task {
-    let! order, sp, cp = 
+    let! order, sp, cp =
         selectTask openContext {
             for order in Sales.SalesOrderHeader do
             join s in Sales.SalesPerson on (order.SalesPersonID.Value = s.BusinessEntityID)
@@ -1124,5 +1124,62 @@ let ``Multiple Joins Same Table`` () = task {
     // Verify that same-table properties are read properly.
     sp.FirstName =! "Tsvi"
     cp.FirstName =! "James"
+}
+
+// SQL Function wrappers for testing
+[<AutoOpen>]
+module SqlFn =
+    let LEN (s: string) : int = sqlFn
+    let UPPER (s: string) : string = sqlFn
+    let LOWER (s: string) : string = sqlFn
+    let GETDATE () : DateTime = sqlFn
+    let SUBSTRING (s: string, start: int, length: int) : string = sqlFn
+    let CONCAT (s1: string, s2: string) : string = sqlFn
+
+[<Test>]
+let ``SQL Functions - Multiple functions in select`` () = task {
+    let! results =
+        selectTask openContext {
+            for p in Person.Person do
+            where (p.FirstName = "Ken")
+            select (p.FirstName, LEN p.FirstName, UPPER p.FirstName, GETDATE())
+            take 1
+        }
+
+    let firstName, len, upperName, serverDate = results |> Seq.head
+    firstName =! "Ken"
+    len =! 3
+    upperName =! "KEN"
+    // Server may be in different timezone, just verify it's a recent date (within 24 hours)
+    Assert.That(serverDate, Is.EqualTo(DateTime.UtcNow).Within(TimeSpan.FromHours(24.0)))
+}
+
+[<Test>]
+let ``SQL Functions - Nested function calls`` () = task {
+    let! results =
+        selectTask openContext {
+            for p in Person.Person do
+            where (p.FirstName = "Ken")
+            select (LEN (UPPER p.FirstName))
+            take 1
+        }
+
+    let lenOfUpper = results |> Seq.head
+    lenOfUpper =! 3  // LEN(UPPER("Ken")) = LEN("KEN") = 3
+}
+
+[<Test>]
+let ``SQL Functions - Multi-param functions`` () = task {
+    let! results =
+        selectTask openContext {
+            for p in Person.Person do
+            where (p.FirstName = "Ken")
+            select (SUBSTRING(p.FirstName, 1, 2), CONCAT(p.FirstName, p.LastName))
+            take 1
+        }
+
+    let substring, concat = results |> Seq.head
+    substring =! "Ke"  // SUBSTRING("Ken", 1, 2) = "Ke"
+    Assert.That(concat, Does.StartWith("Ken"))  // CONCAT("Ken", LastName)
 }
     

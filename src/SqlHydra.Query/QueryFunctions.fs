@@ -96,3 +96,13 @@ module Aggregates =
 
     /// Gets the AVG of the given column and returns 'Result.
     let avgByAs<'P, 'Result when 'P : struct and 'Result : struct> (prop: 'P) : 'Result = Unchecked.defaultof<'Result>
+
+[<AutoOpen>]
+module SqlFunctions =
+
+    /// A stub value used to define SQL function wrappers.
+    /// The function name and arguments are translated directly to SQL.
+    /// Example:
+    ///   let LEN (s: string) : int = sqlFn
+    ///   let SUBSTRING (s: string, start: int, length: int) : string = sqlFn
+    let sqlFn<'Return> : 'Return = Unchecked.defaultof<'Return>

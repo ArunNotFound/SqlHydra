@@ -138,19 +138,8 @@ type SelectBuilder<'Selected, 'Mapped> () =
                 | LinqExpressionVisitors.SelectedColumn (tableAlias, column, _, _, _) -> 
                     // Select a single column
                     q.Select($"%s{tableAlias}.%s{column}")
-                | LinqExpressionVisitors.SelectedAggregateColumn (aggFn, tableAlias, column) -> 
-                    // Currently in v2.4.0, SqlKata doesn't support multiple inline aggregate functions.
-                    // Use SelectRaw as a workaround until SqlKata supports multiple aggregates.
-                    // https://github.com/sqlkata/querybuilder/pull/504
-                    let fqCol = $"%s{tableAlias}.%s{column}"
-
-                    // SqlKata will translate curly braces to dialect-specific characters (ex: [] for mssql, "" for postgres)
-                    let fqColWithCurlyBraces = 
-                        fqCol.Split([|'.'|], StringSplitOptions.RemoveEmptyEntries)
-                        |> Array.map (sprintf "{%s}")
-                        |> fun parts -> String.Join(".", parts)
-
-                    q.SelectRaw($"{aggFn}({fqColWithCurlyBraces})")
+                | LinqExpressionVisitors.SelectedExpression sqlFragment ->
+                    q.SelectRaw(sqlFragment)
             ) state.Query
                   
         QuerySource<'Selected, Query>(queryWithSelectedColumns, state.TableMappings)
