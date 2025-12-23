@@ -2,6 +2,8 @@
 
 open Swensen.Unquote
 open SqlHydra.Query
+open SqlHydra.Query.OracleExtensions
+open type SqlFn
 open Oracle.ManagedDataAccess.Client
 open NUnit.Framework
 open DB
@@ -420,4 +422,21 @@ let ``Distinct Test``() = task {
     | None -> ()
 
     ctx.RollbackTransaction()
+}
+
+[<Test>]
+let ``SqlFn - Oracle functions smoke test``() = task {
+    use ctx = openContext()
+
+    let! results =
+        selectTask ctx {
+            for c in OT.CUSTOMERS do
+            select (c.NAME, LENGTH c.NAME, UPPER c.NAME, NVL(c.WEBSITE, "N/A"))
+            take 1
+        }
+
+    let name, len, upperName, website = results |> Seq.head
+    Assert.That(len, Is.GreaterThan(0))
+    Assert.That(upperName, Is.EqualTo(name.ToUpper()))
+    Assert.That(website, Is.Not.Null)
 }

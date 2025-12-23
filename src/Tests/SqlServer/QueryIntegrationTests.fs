@@ -1136,6 +1136,10 @@ module SqlFn =
     let SUBSTRING (s: string, start: int, length: int) : string = sqlFn
     let CONCAT (s1: string, s2: string) : string = sqlFn
 
+// Use the built-in SqlFn from SqlServerExtensions
+open SqlHydra.Query.SqlServerExtensions
+open type SqlFn
+
 [<Test>]
 let ``SQL Functions - Multiple functions in select`` () = task {
     let! results =
@@ -1182,4 +1186,81 @@ let ``SQL Functions - Multi-param functions`` () = task {
     substring =! "Ke"  // SUBSTRING("Ken", 1, 2) = "Ke"
     Assert.That(concat, Does.StartWith("Ken"))  // CONCAT("Ken", LastName)
 }
-    
+
+[<Test>]
+let ``SQL Functions - Static methods with open type`` () = task {
+    // Using `open type SqlServerFn` allows unqualified access - looks like SQL!
+    let! results =
+        selectTask openContext {
+            for p in Person.Person do
+            where (p.FirstName = "Ken")
+            select (LEN(p.FirstName), UPPER(p.FirstName), ISNULL(p.MiddleName, "N/A"))
+            take 1
+        }
+
+    let len, upperName, middleName = results |> Seq.head
+    len =! 3
+    upperName =! "KEN"
+    // Ken's middle name is NULL, so ISNULL returns "N/A"
+    middleName =! "N/A"
+}
+
+[<Test>]
+let ``SQL Functions - ISNULL with Option overload`` () = task {
+    // Find a Ken with NULL middle name (most have NULL)
+    let! nullResults =
+        selectTask openContext {
+            for p in Person.Person do
+            where (p.FirstName = "Ken" && isNullValue p.MiddleName)
+            select (ISNULL(p.MiddleName, "NoMiddle"))
+            take 1
+        }
+
+    let replaced = nullResults |> Seq.head
+    replaced =! "NoMiddle"  // NULL should be replaced with "NoMiddle"
+
+    // Find a Ken with non-NULL middle name
+    let! nonNullResults =
+        selectTask openContext {
+            for p in Person.Person do
+            where (p.FirstName = "Ken" && isNotNullValue p.MiddleName)
+            select (ISNULL(p.MiddleName, "NoMiddle"))
+            take 1
+        }
+
+    let actual = nonNullResults |> Seq.head
+    Assert.That(actual, Is.Not.EqualTo("NoMiddle"))  // Should return actual middle name, not replacement
+}
+
+[<Test>]
+let ``SQL Functions - ISNULL with non-optional column`` () = task {
+    // FirstName is non-optional (string, not Option<string>)
+    // This uses the generic 'T overload
+    let! results =
+        selectTask openContext {
+            for p in Person.Person do
+            where (p.FirstName = "Ken")
+            select (ISNULL(p.FirstName, "Unknown"))
+            take 1
+        }
+
+    let firstName = results |> Seq.head
+    firstName =! "Ken"  // FirstName is never NULL, so returns actual value
+}
+
+[<Test>]
+let ``SQL Functions - Date and numeric functions`` () = task {
+    let! results =
+        selectTask openContext {
+            for o in Sales.SalesOrderHeader do
+            select (o.SalesOrderID, YEAR(o.OrderDate), MONTH(o.OrderDate), ABS(o.TotalDue), ROUND(o.TotalDue, 0))
+            take 1
+        }
+
+    let orderId, year, month, absDue, roundedDue = results |> Seq.head
+    Assert.That(orderId, Is.GreaterThan(0))
+    Assert.That(year, Is.GreaterThan(2000))
+    Assert.That(month, Is.GreaterThanOrEqualTo(1).And.LessThanOrEqualTo(12))
+    Assert.That(absDue, Is.GreaterThanOrEqualTo(0m))
+    Assert.That(roundedDue, Is.GreaterThanOrEqualTo(0m))
+}

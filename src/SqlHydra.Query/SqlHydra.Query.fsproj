@@ -42,6 +42,8 @@
 		<Compile Include="SqlServerExtensions.fs" />
 		<Compile Include="NpgsqlExtensions.fs" />
 		<Compile Include="SqliteExtensions.fs" />
+		<Compile Include="OracleExtensions.fs" />
+		<Compile Include="MySqlExtensions.fs" />
 		<Compile Include="DataReaderExtensions.fs" />
 	</ItemGroup>
 

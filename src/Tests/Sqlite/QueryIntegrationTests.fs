@@ -3,6 +3,7 @@
 open SqlHydra.Query
 open DB
 open SqlHydra.Query.SqliteExtensions
+open type SqlFn
 open Swensen.Unquote
 open NUnit.Framework
 open System.Threading.Tasks
@@ -428,5 +429,22 @@ let ``OnConflictDoUpdate``() = task {
     r2.[0] =! updatedAddress
 
     ctx.RollbackTransaction()
+}
+
+[<Test>]
+let ``SqlFn - SQLite functions smoke test``() = task {
+    use ctx = openContext()
+
+    let! results =
+        selectTask HydraReader.Read ctx {
+            for a in main.Address do
+            select (a.City, length a.City, upper a.City, ifnull(a.AddressLine2, "N/A"))
+            take 1
+        }
+
+    let city, len, upperCity, line2 = results |> Seq.head
+    Assert.That(len, Is.GreaterThan(0))
+    Assert.That(upperCity, Is.EqualTo(city.ToUpper()))
+    Assert.That(line2, Is.Not.Null)
 }
 

@@ -3,7 +3,9 @@
     "allow": [
       "Bash(cp:*)",
       "Bash(grep:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(dotnet test:*)",
+      "Bash(dotnet build:*)"
     ],
     "deny": []
   }

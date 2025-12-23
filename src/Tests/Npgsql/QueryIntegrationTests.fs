@@ -3,6 +3,7 @@
 open Swensen.Unquote
 open SqlHydra.Query
 open SqlHydra.Query.NpgsqlExtensions
+open type SqlFn
 open NUnit.Framework
 open System.Threading.Tasks
 open DB
@@ -815,6 +816,25 @@ let ``Update Employee DateOnly``() = task {
         |> Option.map (fun e -> e.birthdate)
             
     actualBirthDate =! Some birthDate
-            
+
     ctx.RollbackTransaction()
+}
+
+[<Test>]
+let ``SqlFn - PostgreSQL functions smoke test``() = task {
+    use ctx = openContext()
+
+    let! results =
+        selectTask HydraReader.Read ctx {
+            for p in person.person do
+            where (p.firstname = "Ken")
+            select (p.firstname, char_length p.firstname, upper p.firstname, coalesce(p.middlename, "N/A"))
+            take 1
+        }
+
+    let firstName, len, upperName, middleName = results |> Seq.head
+    firstName =! "Ken"
+    len =! 3
+    upperName =! "KEN"
+    Assert.That(middleName, Is.Not.Null)
 }
