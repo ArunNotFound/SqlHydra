@@ -297,13 +297,43 @@ let reverseComparison (expType: ExpressionType) =
 
 let getReverseComparison = getComparison << reverseComparison
     
-let visitAlias (exp: Expression) = 
-    let rec visit (exp: Expression) = 
-        match exp with 
+let visitAlias (exp: Expression) =
+    let rec visit (exp: Expression) =
+        match exp with
         | Member m -> visit m.Expression
         | Parameter p -> p.Name
         | _ -> notImpl()
     visit exp
+
+/// Converts a SQL function MethodCall expression to a SQL fragment string.
+/// Example: LEN(p.FirstName) -> "LEN({p}.{FirstName})"
+let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (exp: Expression) : string =
+    match exp with
+    | MethodCall m ->
+        let fnName = m.Method.Name
+        let args =
+            m.Arguments
+            |> Seq.map (fun arg ->
+                match arg with
+                | Member mem ->
+                    let alias = visitAlias mem.Expression
+                    qualifyColumn alias mem.Member
+                | Constant c when c.Value = null ->
+                    "NULL"
+                | Constant c when c.Type = typeof<string> ->
+                    $"'{c.Value}'"
+                | Constant c ->
+                    sprintf "%O" c.Value
+                | MethodCall _ as nested ->
+                    // Handle nested function calls
+                    visitSqlFn qualifyColumn nested
+                | _ ->
+                    notImplMsg $"Unsupported argument type in SQL function: {arg.NodeType}"
+            )
+            |> String.concat ", "
+        $"{fnName}({args})"
+    | _ ->
+        notImplMsg $"Expected a method call expression but got: {exp.NodeType}"
 
 
 let visitWhere<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool>>) (qualifyColumn: string -> MemberInfo -> string) =
@@ -581,13 +611,48 @@ let visitWhere<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool>
                 let alias = visitAlias p.Expression
                 let fqCol = qualifyColumn alias p.Member
                 match value with
-                | null when comparison = "=" -> 
+                | null when comparison = "=" ->
                     query.WhereNull(fqCol)
-                | null when comparison = "<>" -> 
+                | null when comparison = "<>" ->
                     query.WhereNotNull(fqCol)
-                | _ -> 
+                | _ ->
                     let queryParameter = KataUtils.getQueryParameterForValue p.Member value
                     query.Where(fqCol, comparison, queryParameter)
+
+            // SQL function compared to value: LEN(p.Name) > 5
+            | MethodCall m, Value value ->
+                let sqlFragment = visitSqlFn qualifyColumn (m :> Expression)
+                let comparison = getComparison exp.NodeType
+                query.WhereRaw($"{sqlFragment} {comparison} ?", [| value |])
+
+            // Value compared to SQL function: 5 < LEN(p.Name)
+            | Value value, MethodCall m ->
+                let sqlFragment = visitSqlFn qualifyColumn (m :> Expression)
+                let comparison = getReverseComparison exp.NodeType
+                query.WhereRaw($"{sqlFragment} {comparison} ?", [| value |])
+
+            // SQL function compared to column: LEN(p.Name) > p.MinLength
+            | MethodCall m, Column (p, _) ->
+                let sqlFragment = visitSqlFn qualifyColumn (m :> Expression)
+                let comparison = getComparison exp.NodeType
+                let alias = visitAlias p.Expression
+                let fqCol = qualifyColumn alias p.Member
+                query.WhereRaw($"{sqlFragment} {comparison} {fqCol}")
+
+            // Column compared to SQL function: p.MinLength < LEN(p.Name)
+            | Column (p, _), MethodCall m ->
+                let alias = visitAlias p.Expression
+                let fqCol = qualifyColumn alias p.Member
+                let sqlFragment = visitSqlFn qualifyColumn (m :> Expression)
+                let comparison = getComparison exp.NodeType
+                query.WhereRaw($"{fqCol} {comparison} {sqlFragment}")
+
+            // SQL function compared to SQL function: LEN(p.First) > LEN(p.Last)
+            | MethodCall m1, MethodCall m2 ->
+                let sqlFragment1 = visitSqlFn qualifyColumn (m1 :> Expression)
+                let sqlFragment2 = visitSqlFn qualifyColumn (m2 :> Expression)
+                let comparison = getComparison exp.NodeType
+                query.WhereRaw($"{sqlFragment1} {comparison} {sqlFragment2}")
 
             | Value v1, Value v2 ->
                 notImplMsg("Value to value comparisons are not currently supported. Ex: where (1 = 1)")
@@ -888,30 +953,9 @@ let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
             [ SelectedExpression $"{aggType}({fqCol})" ]
         | MethodCall m ->
             // Treat any other method call as a SQL function
-            let fnName = m.Method.Name
-            let args =
-                m.Arguments
-                |> Seq.map (fun arg ->
-                    match arg with
-                    | Member mem ->
-                        let alias = visitAlias mem.Expression
-                        $"{{%s{alias}}}.{{%s{mem.Member.Name}}}"
-                    | Constant c when c.Value = null ->
-                        "NULL"
-                    | Constant c when c.Type = typeof<string> ->
-                        $"'{c.Value}'"
-                    | Constant c ->
-                        sprintf "%O" c.Value
-                    | MethodCall _ as nested ->
-                        // Handle nested function calls
-                        match visit nested with
-                        | [ SelectedExpression sql ] -> sql
-                        | _ -> notImplMsg $"Unsupported nested expression in function argument."
-                    | _ ->
-                        notImplMsg $"Unsupported argument type in SQL function: {arg.NodeType}"
-                )
-                |> String.concat ", "
-            [ SelectedExpression $"{fnName}({args})" ]
+            let qualifyCol alias (mem: MemberInfo) = $"{{%s{alias}}}.{{%s{mem.Name}}}"
+            let sqlFragment = visitSqlFn qualifyCol (m :> Expression)
+            [ SelectedExpression sqlFragment ]
         | New n -> 
             // Handle a tuple of multiple tables
             n.Arguments 

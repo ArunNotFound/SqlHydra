@@ -1264,3 +1264,47 @@ let ``SQL Functions - Date and numeric functions`` () = task {
     Assert.That(absDue, Is.GreaterThanOrEqualTo(0m))
     Assert.That(roundedDue, Is.GreaterThanOrEqualTo(0m))
 }
+
+[<Test>]
+let ``SQL Functions - In WHERE clause with value comparison`` () = task {
+    let! results =
+        selectTask openContext {
+            for p in Person.Person do
+            where (LEN(p.FirstName) > 3)
+            select p.FirstName
+            take 5
+        }
+
+    // All names should have length > 3
+    for name in results do
+        Assert.That(name.Length, Is.GreaterThan(3))
+}
+
+[<Test>]
+let ``SQL Functions - In WHERE clause comparing two functions`` () = task {
+    let! results =
+        selectTask openContext {
+            for p in Person.Person do
+            where (LEN(p.FirstName) < LEN(p.LastName))
+            select (p.FirstName, p.LastName)
+            take 5
+        }
+
+    // FirstName should be shorter than LastName
+    for firstName, lastName in results do
+        Assert.That(firstName.Length, Is.LessThan(lastName.Length))
+}
+
+[<Test>]
+let ``SQL Functions - In WHERE clause with UPPER`` () = task {
+    let! results =
+        selectTask openContext {
+            for p in Person.Person do
+            where (UPPER(p.FirstName) = "KEN")
+            select p.FirstName
+            take 1
+        }
+
+    let firstName = results |> Seq.head
+    firstName =! "Ken"
+}
