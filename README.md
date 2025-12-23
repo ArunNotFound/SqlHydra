@@ -634,7 +634,7 @@ If you get SSL certificate errors, append `;TrustServerCertificate=True` to your
 <details>
 <summary><h2>Supported Frameworks</h2></summary>
 
-- .NET 8 and .NET 9 are supported
+- .NET 8, .NET 9, and .NET 10 are supported
 - For .NET 5 support, use the older provider-specific tools (`SqlHydra.SqlServer`, etc.)
 
 </details>
