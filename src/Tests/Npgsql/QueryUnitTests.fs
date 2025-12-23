@@ -10,6 +10,9 @@ open Npgsql.AdventureWorksNet8
 #if NET9_0
 open Npgsql.AdventureWorksNet9
 #endif
+#if NET10_0
+open Npgsql.AdventureWorksNet10
+#endif
 
 [<Test>]
 let ``Simple Where``() = 

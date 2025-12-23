@@ -11,6 +11,9 @@ open Sqlite.AdventureWorksNet8
 #if NET9_0
 open Sqlite.AdventureWorksNet9
 #endif
+#if NET10_0
+open Sqlite.AdventureWorksNet10
+#endif
 
 [<Test>]
 let ``Simple Where``() = 

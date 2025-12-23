@@ -11,6 +11,9 @@ open SqlServer.AdventureWorksNet8
 #if NET9_0
 open SqlServer.AdventureWorksNet9
 #endif
+#if NET10_0
+open SqlServer.AdventureWorksNet10
+#endif
 
 let openContext() = 
     let compiler = SqlKata.Compilers.SqlServerCompiler()

@@ -12,6 +12,9 @@ open Oracle.AdventureWorksNet8
 #if NET9_0
 open Oracle.AdventureWorksNet9
 #endif
+#if NET10_0
+open Oracle.AdventureWorksNet10
+#endif
 
 [<Test>]
 let ``Simple Where``() = 
