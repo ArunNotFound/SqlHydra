@@ -269,6 +269,52 @@ let getCustomerCount () =
 > select (minBy (Some p.ListPrice))  // Returns Option
 > ```
 
+### SQL Functions
+
+You can call SQL functions in your `select` expressions by defining simple F# wrapper functions. The function name becomes the SQL function name, and arguments are translated to SQL.
+
+**Define your SQL function wrappers:**
+```fsharp
+open SqlHydra.Query
+
+[<AutoOpen>]
+module SqlFn =
+    let LEN (s: string) : int = sqlFn
+    let UPPER (s: string) : string = sqlFn
+    let LOWER (s: string) : string = sqlFn
+    let GETDATE () : DateTime = sqlFn
+    let SUBSTRING (s: string, start: int, length: int) : string = sqlFn
+    let CONCAT (s1: string, s2: string) : string = sqlFn
+```
+
+**Use them in queries:**
+```fsharp
+let getNameLengths () =
+    selectTask openContext {
+        for p in Person.Person do
+        select (p.FirstName, LEN p.FirstName, UPPER p.FirstName)
+    }
+// Generates: SELECT [p].[FirstName], LEN([p].[FirstName]), UPPER([p].[FirstName]) FROM ...
+
+// Multi-parameter functions
+let getSubstrings () =
+    selectTask openContext {
+        for p in Person.Person do
+        select (SUBSTRING(p.FirstName, 1, 3), CONCAT(p.FirstName, p.LastName))
+    }
+// Generates: SELECT SUBSTRING([p].[FirstName], 1, 3), CONCAT([p].[FirstName], [p].[LastName]) FROM ...
+
+// Nested functions
+let getUpperLength () =
+    selectTask openContext {
+        for p in Person.Person do
+        select (LEN (UPPER p.FirstName))
+    }
+// Generates: SELECT LEN(UPPER([p].[FirstName])) FROM ...
+```
+
+> **Note:** The `sqlFn` helper is just `Unchecked.defaultof<'Return>` - the actual function is never executed. The expression visitor reads the function name and arguments to generate SQL. If you use an invalid function name, you'll get a database error at runtime.
+
 ### Subqueries
 
 ```fsharp
