@@ -271,49 +271,77 @@ let getCustomerCount () =
 
 ### SQL Functions
 
-You can call SQL functions in your `select` expressions by defining simple F# wrapper functions. The function name becomes the SQL function name, and arguments are translated to SQL.
+SqlHydra.Query includes built-in SQL functions for each supported database provider. These can be used in both `select` and `where` clauses.
 
-**Define your SQL function wrappers:**
+**Setup:**
 ```fsharp
-open SqlHydra.Query
+// Import the extension module for your database provider:
+open SqlHydra.Query.SqlServerExtensions  // SQL Server
+open SqlHydra.Query.NpgsqlExtensions     // PostgreSQL
+open SqlHydra.Query.SqliteExtensions     // SQLite
+open SqlHydra.Query.OracleExtensions     // Oracle
+open SqlHydra.Query.MySqlExtensions      // MySQL
 
-[<AutoOpen>]
-module SqlFn =
-    let LEN (s: string) : int = sqlFn
-    let UPPER (s: string) : string = sqlFn
-    let LOWER (s: string) : string = sqlFn
-    let GETDATE () : DateTime = sqlFn
-    let SUBSTRING (s: string, start: int, length: int) : string = sqlFn
-    let CONCAT (s1: string, s2: string) : string = sqlFn
+open type SqlFn  // Optional: allows unqualified access, e.g. LEN vs SqlFn.LEN
 ```
 
-**Use them in queries:**
+**Use in select and where clauses:**
 ```fsharp
-let getNameLengths () =
-    selectTask openContext {
-        for p in Person.Person do
-        select (p.FirstName, LEN p.FirstName, UPPER p.FirstName)
-    }
-// Generates: SELECT [p].[FirstName], LEN([p].[FirstName]), UPPER([p].[FirstName]) FROM ...
+// String functions
+selectTask openContext {
+    for p in Person.Person do
+    where (LEN(p.FirstName) > 3)
+    select (p.FirstName, LEN(p.FirstName), UPPER(p.FirstName))
+}
+// Generates: SELECT ... WHERE LEN([p].[FirstName]) > 3
 
-// Multi-parameter functions
-let getSubstrings () =
-    selectTask openContext {
-        for p in Person.Person do
-        select (SUBSTRING(p.FirstName, 1, 3), CONCAT(p.FirstName, p.LastName))
-    }
-// Generates: SELECT SUBSTRING([p].[FirstName], 1, 3), CONCAT([p].[FirstName], [p].[LastName]) FROM ...
+// Null handling - ISNULL accepts Option<'T> and returns unwrapped 'T
+selectTask openContext {
+    for p in Person.Person do
+    select (ISNULL(p.MiddleName, "N/A"))  // Option<string> -> string
+}
 
-// Nested functions
-let getUpperLength () =
-    selectTask openContext {
-        for p in Person.Person do
-        select (LEN (UPPER p.FirstName))
-    }
-// Generates: SELECT LEN(UPPER([p].[FirstName])) FROM ...
+// Date functions
+selectTask openContext {
+    for o in Sales.SalesOrderHeader do
+    where (YEAR(o.OrderDate) = 2024)
+    select (o.OrderDate, YEAR(o.OrderDate), MONTH(o.OrderDate))
+}
+
+// Compare two functions
+selectTask openContext {
+    for p in Person.Person do
+    where (LEN(p.FirstName) < LEN(p.LastName))
+    select (p.FirstName, p.LastName)
+}
 ```
 
-> **Note:** The `sqlFn` helper is just `Unchecked.defaultof<'Return>` - the actual function is never executed. The expression visitor reads the function name and arguments to generate SQL. If you use an invalid function name, you'll get a database error at runtime.
+**Built-in functions** include string functions (`LEN`, `UPPER`, `SUBSTRING`, etc.), null handling (`ISNULL`/`COALESCE` with overloads for `Option<'T>` and `Nullable<'T>`), numeric functions (`ABS`, `ROUND`, etc.), and date/time functions (`GETDATE`, `YEAR`, `MONTH`, etc.).
+
+See the full list for each provider:
+- [SQL Server](src/SqlHydra.Query/SqlServerExtensions.fs)
+- [PostgreSQL](src/SqlHydra.Query/NpgsqlExtensions.fs)
+- [SQLite](src/SqlHydra.Query/SqliteExtensions.fs)
+- [Oracle](src/SqlHydra.Query/OracleExtensions.fs)
+- [MySQL](src/SqlHydra.Query/MySqlExtensions.fs)
+
+**Define custom functions:**
+
+You can easily define your own SQL function wrappers using the `sqlFn` helper:
+```fsharp
+// Define a wrapper - the function name becomes the SQL function name
+let SOUNDEX (s: string) : string = sqlFn
+let DIFFERENCE (s1: string, s2: string) : int = sqlFn
+
+// Use in queries
+selectTask openContext {
+    for p in Person.Person do
+    where (SOUNDEX(p.LastName) = SOUNDEX("Smith"))
+    select p.LastName
+}
+```
+
+> **Note:** The `sqlFn` helper returns `Unchecked.defaultof<'Return>` - the function is never executed at runtime. The expression visitor translates the function name and arguments to SQL. If you use an invalid function name, you'll get a database error at runtime.
 
 ### Subqueries
 
