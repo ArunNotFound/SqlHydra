@@ -28,7 +28,7 @@ The wizard will prompt you for connection string, output file, and namespace.
 dotnet add package SqlHydra.Query
 ```
 
-**4. Create QueryConnection factory methods:**
+**4. Create QueryContext factory methods:**
 ```fsharp
 module MyApp.Settings
 open SqlHydra.Query
@@ -37,7 +37,7 @@ open Microsoft.SqlServer.Client
 let openQueryContext connectionString =
     let conn = new SqliteConnection(connectionString)
     conn.Open()
-    let compiler = SqliteCompiler()
+    let compiler = SqliteCompiler() // Choose a SqlKata compiler
     new QueryContext(conn, compiler)
 
 type DB =
