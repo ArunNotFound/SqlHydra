@@ -28,26 +28,30 @@ The wizard will prompt you for connection string, output file, and namespace.
 dotnet add package SqlHydra.Query
 ```
 
-**4. Write your first query:**
+**4. Create QueryConnection factory methods:**
 ```fsharp
-/// Defines a DB Settings type with QueryContext factory methods.
-module Settings = 
-    open SqlHydra.Query
-    open Microsoft.SqlServer.Client
-    
-    type DB =
-        { ConnectionString: string }
+module MyApp.Settings
+open SqlHydra.Query
+open Microsoft.SqlServer.Client
 
-        /// Opens a SQL Server connection.
-        member this.OpenContext() = 
-            let conn = new SqliteConnection(this.ConnectionString)
-            conn.Open()
-            let compiler = SqliteCompiler()
-            new QueryContext(conn, compiler)
+let openQueryContext connectionString =
+    let conn = new SqliteConnection(connectionString)
+    conn.Open()
+    let compiler = SqliteCompiler()
+    new QueryContext(conn, compiler)
 
-        /// A factory method that allows a selectTask CE to open a connection.
-        member this.Open = Create this.OpenContext
+type DB =
+    /// Define a DB Settings type with QueryContext factory methods.
+    { ConnectionString: string }
+    /// Opens a SQL Server connection in a SqlHydra QueryContext.
+    member this.OpenContext() = openQueryContext this.ConnectionString
+    /// A factory method that allows a selectTask CE to open a connection.
+    member this.Open = Create this.OpenContext
+```
 
+**5. Write your first query:**
+```fsharp
+open SqlHydra.Query
 open MyApp.AdventureWorks                  // Your generated namespace
 open MyApp.AdventureWorks.HydraBuilders    // Strongly typed select CE
 
