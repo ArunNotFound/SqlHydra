@@ -43,7 +43,7 @@ let openQueryContext connectionString =
 type DB =
     /// Define a DB Settings type with QueryContext factory methods.
     { ConnectionString: string }
-    /// Opens a SQL Server connection in a SqlHydra QueryContext.
+    /// Opens a SQLite connection in a SqlHydra QueryContext.
     member this.OpenContext() = openQueryContext this.ConnectionString
     /// A factory method that allows a selectTask CE to open a connection.
     member this.Open = Create this.OpenContext
