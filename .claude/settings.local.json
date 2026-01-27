@@ -5,7 +5,9 @@
       "Bash(grep:*)",
       "Bash(find:*)",
       "Bash(dotnet test:*)",
-      "Bash(dotnet build:*)"
+      "Bash(dotnet build:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(gh issue view:*)"
     ],
     "deny": []
   }

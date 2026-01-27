@@ -288,13 +288,107 @@ type SelectBuilder<'Selected, 'Mapped> () =
 
     /// References a table variable from a correlated parent query from within a subquery.
     [<CustomOperation("correlate", MaintainsVariableSpace = true, IsLikeZip = true)>]
-    member this.Correlate (outerSource: QuerySource<'Outer>, 
-                      innerSource: QuerySource<'Inner>, 
-                      resultSelector: Expression<Func<'Outer,'Inner,'JoinResult>> ) = 
+    member this.Correlate (outerSource: QuerySource<'Outer>,
+                      innerSource: QuerySource<'Inner>,
+                      resultSelector: Expression<Func<'Outer,'Inner,'JoinResult>> ) =
 
         let mergedTables = mergeTableMappings (outerSource.TableMappings, innerSource.TableMappings)
         let query = outerSource |> getQueryOrDefault
         QuerySource<'JoinResult, Query>(query, mergedTables)
+
+    /// Introduces an INNER JOIN table binding (use with on' to complete the join).
+    /// Unlike the standard `join ... on`, this allows predicate-style join conditions.
+    /// Example: `joinOn d in Sales.Detail` followed by `on' (o.Id = d.Id && d.Type = "X")`
+    [<CustomOperation("joinOn", MaintainsVariableSpace = true, IsLikeZip = true)>]
+    member this.JoinOn (outerSource: QuerySource<'Outer>,
+                        innerSource: QuerySource<'Inner>,
+                        resultSelector: Expression<Func<'Outer, 'Inner, 'JoinResult>>) =
+        // Extract alias from the resultSelector's second parameter (the inner table alias)
+        let innerAlias =
+            match resultSelector.Parameters |> Seq.toList with
+            | [_; inner] -> inner.Name
+            | _ -> failwith "Expected two parameters in join result selector"
+
+        // Merge table mappings
+        let _, innerTableMappings = TableMappings.tryGetByRootOrAlias innerAlias innerSource.TableMappings
+        let mergedTables = mergeTableMappings (outerSource.TableMappings, innerTableMappings)
+
+        // Get inner table info
+        let innerTable = mergedTables[TableAliasKey innerAlias]
+        let tableName = $"{innerTable.Schema}.{innerTable.Name}"
+
+        let pendingJoin = {
+            JoinType = JoinType.Inner
+            TableName = tableName
+            TableAlias = innerAlias
+        }
+
+        let query = outerSource |> getQueryOrDefault
+        // Store pending join info associated with this query
+        PendingJoins.set query pendingJoin
+        QuerySource<'JoinResult, Query>(query, mergedTables)
+
+    /// Introduces a LEFT JOIN table binding (use with on' to complete the join).
+    /// Unlike the standard `leftJoin ... on`, this allows predicate-style join conditions.
+    /// Example: `leftJoinOn d in Sales.Detail` followed by `on' (o.Id = d.Value.Id && d.Value.Type = "X")`
+    [<CustomOperation("leftJoinOn", MaintainsVariableSpace = true, IsLikeZip = true)>]
+    member this.LeftJoinOn (outerSource: QuerySource<'Outer>,
+                            innerSource: QuerySource<'Inner>,
+                            resultSelector: Expression<Func<'Outer, 'Inner option, 'JoinResult>>) =
+        // Extract alias from the resultSelector's second parameter (the inner table alias)
+        let innerAlias =
+            match resultSelector.Parameters |> Seq.toList with
+            | [_; inner] -> inner.Name
+            | _ -> failwith "Expected two parameters in leftJoin result selector"
+
+        // Merge table mappings
+        let _, innerTableMappings = TableMappings.tryGetByRootOrAlias innerAlias innerSource.TableMappings
+        let mergedTables = mergeTableMappings (outerSource.TableMappings, innerTableMappings)
+
+        // Get inner table info
+        let innerTable = mergedTables[TableAliasKey innerAlias]
+        let tableName = $"{innerTable.Schema}.{innerTable.Name}"
+
+        let pendingJoin = {
+            JoinType = JoinType.Left
+            TableName = tableName
+            TableAlias = innerAlias
+        }
+
+        let query = outerSource |> getQueryOrDefault
+        // Store pending join info associated with this query
+        PendingJoins.set query pendingJoin
+        QuerySource<'JoinResult, Query>(query, mergedTables)
+
+    /// Completes a pending join with a predicate expression.
+    /// Used after `joinOn` or `leftJoinOn` to specify the join condition.
+    /// Example: `on' (o.Id = d.Id && d.Type = "X")`
+    [<CustomOperation("on'", MaintainsVariableSpace = true)>]
+    member this.OnPredicate (state: QuerySource<'T, Query>,
+                             [<ProjectionParameter>] joinPredicate: Expression<Func<'T, bool>>) =
+        let query = state.Query
+        let pendingJoin =
+            match PendingJoins.tryTake query with
+            | Some pj -> pj
+            | None -> failwith "on' must be used after joinOn or leftJoinOn"
+
+        let tableMappings = state.TableMappings |> Map.values
+
+        // Build the join predicate visitor
+        let joinBuilder = LinqExpressionVisitors.visitJoinPredicate<'T> tableMappings joinPredicate qualifyColumnWithAlias
+
+        // Create the table name with alias
+        let tableNameAsAlias = $"{pendingJoin.TableName} AS {pendingJoin.TableAlias}"
+
+        // Apply the join based on type
+        let updatedQuery =
+            match pendingJoin.JoinType with
+            | JoinType.Inner ->
+                query.Join(tableNameAsAlias, fun j -> joinBuilder j)
+            | JoinType.Left ->
+                query.LeftJoin(tableNameAsAlias, fun j -> joinBuilder j)
+
+        QuerySource<'T, Query>(updatedQuery, state.TableMappings)
 
     /// Sets the GROUP BY for one or more columns.
     [<CustomOperation("groupBy", MaintainsVariableSpace = true)>]

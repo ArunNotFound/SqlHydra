@@ -127,10 +127,45 @@ type QuerySource<'T>(tableMappings) =
         member this.GetEnumerator() = Seq.empty<'T>.GetEnumerator() :> Collections.IEnumerator
         member this.GetEnumerator() = Seq.empty<'T>.GetEnumerator()
     member this.TableMappings : Map<TableMappingKey, TableMapping> = tableMappings
-    
-type QuerySource<'T, 'Query>(query, tableMappings) = 
+
+type QuerySource<'T, 'Query>(query, tableMappings) =
     inherit QuerySource<'T>(tableMappings)
     member this.Query : 'Query = query
+
+/// The type of join for predicate-style joins
+type JoinType =
+    | Inner
+    | Left
+
+/// Information about a pending join that will be completed with an `on'` clause
+type PendingJoin = {
+    JoinType: JoinType
+    TableName: string     // e.g., "Sales.SalesOrderDetail"
+    TableAlias: string    // e.g., "d"
+}
+
+/// Module to store pending join info for queries using predicate-style joins.
+/// This is a workaround for F# CE limitations that don't preserve subtype info.
+module PendingJoins =
+    open System.Runtime.CompilerServices
+
+    // Use ConditionalWeakTable to associate PendingJoin with Query objects
+    // without preventing garbage collection of the Query
+    let private pendingJoins = ConditionalWeakTable<SqlKata.Query, PendingJoin>()
+
+    /// Associates a pending join with a query
+    let set (query: SqlKata.Query) (pendingJoin: PendingJoin) =
+        // Remove any existing pending join first
+        pendingJoins.Remove(query) |> ignore
+        pendingJoins.Add(query, pendingJoin)
+
+    /// Gets and removes the pending join for a query
+    let tryTake (query: SqlKata.Query) =
+        match pendingJoins.TryGetValue(query) with
+        | true, pj ->
+            pendingJoins.Remove(query) |> ignore
+            Some pj
+        | false, _ -> None
 
 module internal KataUtils = 
 

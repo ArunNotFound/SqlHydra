@@ -794,8 +794,8 @@ let ``Individual column from a leftJoin table should be optional if Some``() =
 LEFT JOIN [Sales].[SalesOrderDetail] AS [d] ON ([o].[SalesOrderID] = [d].[SalesOrderID])"""
 
 [<Test>]
-let ``select option bug fix`` () = 
-    let sql = 
+let ``select option bug fix`` () =
+    let sql =
         select {
             for o in Sales.SalesOrderHeader do
             leftJoin d in Sales.SalesOrderDetail on (o.SalesOrderID = d.Value.SalesOrderID)
@@ -805,3 +805,116 @@ let ``select option bug fix`` () =
         |> toSql
 
     sql.Contains("WHERE ([o].[SalesOrderID] = @p0)") =! true
+
+// ==========================================
+// Predicate-style join tests (on' operator)
+// ==========================================
+
+[<Test>]
+let ``Inner Join with on' - Single Column``() =
+    let sql =
+        select {
+            for o in Sales.SalesOrderHeader do
+            joinOn d in Sales.SalesOrderDetail
+            on' (o.SalesOrderID = d.SalesOrderID)
+            select o
+        }
+        |> toSql
+
+    sql.Contains("INNER JOIN [Sales].[SalesOrderDetail] AS [d] ON ([o].[SalesOrderID] = [d].[SalesOrderID])") =! true
+
+[<Test>]
+let ``Inner Join with on' - Multi Column``() =
+    let sql =
+        select {
+            for o in Sales.SalesOrderHeader do
+            joinOn d in Sales.SalesOrderDetail
+            on' (o.SalesOrderID = d.SalesOrderID && o.ModifiedDate = d.ModifiedDate)
+            select o
+        }
+        |> toSql
+
+    sql.Contains("INNER JOIN [Sales].[SalesOrderDetail] AS [d] ON ([o].[SalesOrderID] = [d].[SalesOrderID] AND [o].[ModifiedDate] = [d].[ModifiedDate])") =! true
+
+[<Test>]
+let ``Left Join with on' - Single Column``() =
+    let sql =
+        select {
+            for o in Sales.SalesOrderHeader do
+            leftJoinOn d in Sales.SalesOrderDetail
+            on' (o.SalesOrderID = d.Value.SalesOrderID)
+            select o
+        }
+        |> toSql
+
+    sql.Contains("LEFT JOIN [Sales].[SalesOrderDetail] AS [d] ON ([o].[SalesOrderID] = [d].[SalesOrderID])") =! true
+
+[<Test>]
+let ``Left Join with on' - Multi Column``() =
+    let sql =
+        select {
+            for o in Sales.SalesOrderHeader do
+            leftJoinOn d in Sales.SalesOrderDetail
+            on' (o.SalesOrderID = d.Value.SalesOrderID && o.ModifiedDate = d.Value.ModifiedDate)
+            select o
+        }
+        |> toSql
+
+    sql.Contains("LEFT JOIN [Sales].[SalesOrderDetail] AS [d] ON ([o].[SalesOrderID] = [d].[SalesOrderID] AND [o].[ModifiedDate] = [d].[ModifiedDate])") =! true
+
+[<Test>]
+let ``Left Join with on' - Column to Value Condition``() =
+    let sql =
+        select {
+            for o in Sales.SalesOrderHeader do
+            leftJoinOn d in Sales.SalesOrderDetail
+            on' (o.SalesOrderID = d.Value.SalesOrderID && d.Value.OrderQty > 5s)
+            select o
+        }
+        |> toSql
+
+    sql.Contains("LEFT JOIN [Sales].[SalesOrderDetail] AS [d] ON ([o].[SalesOrderID] = [d].[SalesOrderID] AND [d].[OrderQty] > @p0)") =! true
+
+[<Test>]
+let ``Existing join on syntax still works``() =
+    // Verify the traditional join ... on syntax still works
+    let sql =
+        select {
+            for o in Sales.SalesOrderHeader do
+            join d in Sales.SalesOrderDetail on (o.SalesOrderID = d.SalesOrderID)
+            select o
+        }
+        |> toSql
+
+    sql.Contains("INNER JOIN [Sales].[SalesOrderDetail] AS [d] ON ([o].[SalesOrderID] = [d].[SalesOrderID])") =! true
+
+[<Test>]
+let ``Existing leftJoin on syntax still works``() =
+    // Verify the traditional leftJoin ... on syntax still works
+    let sql =
+        select {
+            for o in Sales.SalesOrderHeader do
+            leftJoin d in Sales.SalesOrderDetail on (o.SalesOrderID = d.Value.SalesOrderID)
+            select o
+        }
+        |> toSql
+
+    sql.Contains("LEFT JOIN [Sales].[SalesOrderDetail] AS [d] ON ([o].[SalesOrderID] = [d].[SalesOrderID])") =! true
+
+[<Test>]
+let ``Multiple Left Joins with on' - The Motivating Use Case``() =
+    // This tests the motivating use case from the issue:
+    // Multiple left joins where each join has additional conditions beyond just the key
+    let sql =
+        select {
+            for o in Sales.SalesOrderHeader do
+            leftJoinOn d1 in Sales.SalesOrderDetail
+            on' (o.SalesOrderID = d1.Value.SalesOrderID && d1.Value.OrderQty > 1s)
+            leftJoinOn d2 in Sales.SalesOrderDetail
+            on' (o.SalesOrderID = d2.Value.SalesOrderID && d2.Value.OrderQty > 5s)
+            select (o, d1, d2)
+        }
+        |> toSql
+
+    sql.Contains("LEFT JOIN [Sales].[SalesOrderDetail] AS [d1] ON ([o].[SalesOrderID] = [d1].[SalesOrderID] AND [d1].[OrderQty] > @p0)") =! true
+    sql.Contains("LEFT JOIN [Sales].[SalesOrderDetail] AS [d2] ON ([o].[SalesOrderID] = [d2].[SalesOrderID] AND [d2].[OrderQty] > @p1)") =! true

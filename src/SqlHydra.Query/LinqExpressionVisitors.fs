@@ -936,6 +936,94 @@ type Selection =
     | SelectedColumn of tableAlias: string * column: string * columnType: Type * isOpt: bool * isNullable: bool
     | SelectedExpression of sqlFragment: string
 
+/// Visits a join predicate expression and builds SqlKata Join.On() calls.
+/// Used by the `on'` operation to support predicate-style joins.
+let visitJoinPredicate<'T> (tables: TableMapping seq) (predicate: Expression<Func<'T, bool>>) (qualifyColumn: string -> MemberInfo -> string) =
+    /// A column/property on a mapped table/record.
+    let (|Column|_|) (exp: Expression) =
+        match exp with
+        | MappedColumn tables (p, ext) -> Some (p, ext)
+        | _ -> None
+
+    let rec visit (exp: Expression) (j: SqlKata.Join) : SqlKata.Join =
+        match exp with
+        | Lambda x -> visit x.Body j
+        | MethodCall m when m.Method.Name = "Invoke" ->
+            // Handle tuples
+            visit m.Object j
+        | BinaryAnd x ->
+            // Visit left and right sides, chaining .On() calls
+            let j' = visit x.Left j
+            visit x.Right j'
+        | BinaryOr x ->
+            // For OR conditions, we need to use OrOn
+            let leftJoin = visit x.Left (SqlKata.Join())
+            let rightJoin = visit x.Right (SqlKata.Join())
+            j.Where(fun _ -> leftJoin).OrWhere(fun _ -> rightJoin)
+        | BinaryCompare x ->
+            match x.Left, x.Right with
+            // Handle col to col comparisons (the primary join case)
+            | Column (p1, ext1), Column (p2, ext2) ->
+                let lt =
+                    let alias = visitAlias p1.Expression
+                    qualifyColumn alias p1.Member
+                let comparison = getComparison exp.NodeType
+                let rt =
+                    let alias = visitAlias p2.Expression
+                    qualifyColumn alias p2.Member
+                j.On(lt, rt, comparison)
+
+            // Handle column to value comparisons (e.g., d.Type = "SomeValue")
+            | Column (p, ext), Value value ->
+                let alias = visitAlias p.Expression
+                let fqCol = qualifyColumn alias p.Member
+                let comparison = getComparison exp.NodeType
+                match value with
+                | null when comparison = "=" ->
+                    j.WhereNull(fqCol)
+                | null when comparison = "<>" ->
+                    j.WhereNotNull(fqCol)
+                | _ ->
+                    let queryParameter = KataUtils.getQueryParameterForValue p.Member value
+                    j.Where(fqCol, comparison, queryParameter)
+
+            // Handle value to column comparisons (reversed)
+            | Value value, Column (p, ext) ->
+                let alias = visitAlias p.Expression
+                let fqCol = qualifyColumn alias p.Member
+                let comparison = getReverseComparison exp.NodeType
+                match value with
+                | null when comparison = "=" ->
+                    j.WhereNull(fqCol)
+                | null when comparison = "<>" ->
+                    j.WhereNotNull(fqCol)
+                | _ ->
+                    let queryParameter = KataUtils.getQueryParameterForValue p.Member value
+                    j.Where(fqCol, comparison, queryParameter)
+
+            // Nullable.Value / Option.Value comparisons
+            | Column (p, ext), _ when ext = ExtProperty.Value ->
+                let value = x.Right |> compileAndEvaluateExpression
+                let comparison = getComparison exp.NodeType
+                let alias = visitAlias p.Expression
+                let m = tryGetMember p
+                let fqCol = qualifyColumn alias m.Value.Member
+                match value with
+                | null when comparison = "=" ->
+                    j.WhereNull(fqCol)
+                | null when comparison = "<>" ->
+                    j.WhereNotNull(fqCol)
+                | _ ->
+                    let queryParameter = KataUtils.getQueryParameterForValue p.Member value
+                    j.Where(fqCol, comparison, queryParameter)
+
+            | _ ->
+                notImplMsg $"Unsupported join predicate comparison: {x.Left.NodeType} {exp.NodeType} {x.Right.NodeType}"
+        | _ ->
+            notImplMsg $"Unsupported join predicate expression: {exp.NodeType}"
+
+    fun (j: SqlKata.Join) -> visit (predicate :> Expression) j
+
 /// Returns a list of one or more fully qualified table names: ["{schema}.{table}"]
 let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
     let rec visit (exp: Expression) : Selection list =
