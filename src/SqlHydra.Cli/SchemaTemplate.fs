@@ -114,6 +114,22 @@ let mkTable cfg db (table: Table) schema = stringBuffer {
     }
 }
 
+let mkCompiler (providerType: ProviderType) =
+    match providerType with
+    | ProviderType.SqlServer -> "SqlKata.Compilers.SqlServerCompiler()"
+    | ProviderType.Npgsql -> "SqlKata.Compilers.PostgresCompiler()"
+    | ProviderType.MySql -> "SqlKata.Compilers.MySqlCompiler()"
+    | ProviderType.Sqlite -> "SqlKata.Compilers.SqliteCompiler()"
+    | ProviderType.Oracle -> "SqlKata.Compilers.OracleCompiler()"
+
+let mkConnectionType (providerType: ProviderType) =
+    match providerType with
+    | ProviderType.SqlServer -> "Microsoft.Data.SqlClient.SqlConnection"
+    | ProviderType.Npgsql -> "Npgsql.NpgsqlConnection"
+    | ProviderType.MySql -> "MySql.Data.MySqlClient.MySqlConnection"
+    | ProviderType.Sqlite -> "Microsoft.Data.Sqlite.SqliteConnection"
+    | ProviderType.Oracle -> "Oracle.ManagedDataAccess.Client.OracleConnection"
+
 let generate (cfg: Config) (provider: Provider) (db: Schema) (version: string) isLegacy = stringBuffer {
     let filteredTables = 
         db.Tables 
@@ -355,6 +371,8 @@ static member Read(reader: {reader.ReaderType}) =
 
             // If the user configures ProviderDbTypeAttributes, we know they are using SqlHydra.Query.
             if cfg.ProviderDbTypeAttributes then
+                let compiler = mkCompiler provider.Type
+                let connectionType = mkConnectionType provider.Type
                 $"""
 /// Provides select builders that use the generated HydraReader.Read.
 module HydraBuilders =
@@ -365,7 +383,47 @@ module HydraBuilders =
 
     /// Builds a select query with a QueryContext - returns an Async query result
     let selectAsync ct = selectAsync<'Selected, 'Mapped, {reader.ReaderType}> HydraReader.Read ct
-                """
+
+    /// Factory for creating QueryContext instances.
+    type QueryContextFactory =
+        {{
+            /// The database connection string.
+            ConnectionString: string
+
+            /// Opens a new provider-specific connection.
+            OpenConnection: unit -> {connectionType}
+
+            /// Opens a connection and returns a new QueryContext.
+            OpenContext: unit -> QueryContext
+
+            /// Creates a new QueryContext for this query and disposes it automatically.
+            Create: ContextType
+
+            /// Opens a new QueryContext and wraps it in Shared. 
+            /// You are responsible for disposing this context.
+            /// The select builder will NOT dispose the context.            
+            OpenShared: unit -> ContextType
+        }}
+        /// Creates a provider-specific QueryContextFactory for the given database connection string.
+        static member Create(connectionString: string) =
+            let compiler = {compiler}
+
+            let openConn () =
+                let conn = new {connectionType}(connectionString)
+                conn.Open()
+                conn
+
+            let openCtx () =
+                new QueryContext(openConn(), compiler)
+
+            {{
+                ConnectionString = connectionString
+                OpenConnection = openConn
+                OpenContext = openCtx
+                Create = Create (fun () -> openCtx())
+                OpenShared = fun () -> Shared (openCtx())
+            }}
+            """
 
         }
 
