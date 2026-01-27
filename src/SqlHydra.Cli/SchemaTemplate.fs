@@ -405,7 +405,7 @@ module HydraBuilders =
             OpenShared: unit -> ContextType
         }}
         /// Creates a provider-specific QueryContextFactory for the given database connection string.
-        static member Create(connectionString: string) =
+        static member Initialize(connectionString: string) =
             let compiler = {compiler}
 
             let openConn () =
