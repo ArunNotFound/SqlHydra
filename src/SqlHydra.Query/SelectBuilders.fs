@@ -298,9 +298,9 @@ type SelectBuilder<'Selected, 'Mapped> () =
 
     /// Introduces an INNER JOIN table binding (use with on' to complete the join).
     /// Unlike the standard `join ... on`, this allows predicate-style join conditions.
-    /// Example: `joinOn d in Sales.Detail` followed by `on' (o.Id = d.Id && d.Type = "X")`
-    [<CustomOperation("joinOn", MaintainsVariableSpace = true, IsLikeZip = true)>]
-    member this.JoinOn (outerSource: QuerySource<'Outer>,
+    /// Example: `join' d in Sales.Detail; on' (o.Id = d.Id && d.Type = "X")`
+    [<CustomOperation("join'", MaintainsVariableSpace = true, IsLikeZip = true)>]
+    member this.Join' (outerSource: QuerySource<'Outer>,
                         innerSource: QuerySource<'Inner>,
                         resultSelector: Expression<Func<'Outer, 'Inner, 'JoinResult>>) =
         // Extract alias from the resultSelector's second parameter (the inner table alias)
@@ -330,9 +330,9 @@ type SelectBuilder<'Selected, 'Mapped> () =
 
     /// Introduces a LEFT JOIN table binding (use with on' to complete the join).
     /// Unlike the standard `leftJoin ... on`, this allows predicate-style join conditions.
-    /// Example: `leftJoinOn d in Sales.Detail` followed by `on' (o.Id = d.Value.Id && d.Value.Type = "X")`
-    [<CustomOperation("leftJoinOn", MaintainsVariableSpace = true, IsLikeZip = true)>]
-    member this.LeftJoinOn (outerSource: QuerySource<'Outer>,
+    /// Example: `leftJoin' d in Sales.Detail; on' (o.Id = d.Value.Id && d.Value.Type = "X")`
+    [<CustomOperation("leftJoin'", MaintainsVariableSpace = true, IsLikeZip = true)>]
+    member this.LeftJoin' (outerSource: QuerySource<'Outer>,
                             innerSource: QuerySource<'Inner>,
                             resultSelector: Expression<Func<'Outer, 'Inner option, 'JoinResult>>) =
         // Extract alias from the resultSelector's second parameter (the inner table alias)
@@ -361,7 +361,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
         QuerySource<'JoinResult, Query>(query, mergedTables)
 
     /// Completes a pending join with a predicate expression.
-    /// Used after `joinOn` or `leftJoinOn` to specify the join condition.
+    /// Used after `join'` or `leftJoin'` to specify the join condition.
     /// Example: `on' (o.Id = d.Id && d.Type = "X")`
     [<CustomOperation("on'", MaintainsVariableSpace = true)>]
     member this.OnPredicate (state: QuerySource<'T, Query>,
@@ -370,7 +370,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
         let pendingJoin =
             match PendingJoins.tryTake query with
             | Some pj -> pj
-            | None -> failwith "on' must be used after joinOn or leftJoinOn"
+            | None -> failwith "on' must be used after join' or leftJoin'"
 
         let tableMappings = state.TableMappings |> Map.values
 

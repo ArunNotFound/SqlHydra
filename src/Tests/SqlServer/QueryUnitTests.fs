@@ -815,8 +815,7 @@ let ``Inner Join with on' - Single Column``() =
     let sql =
         select {
             for o in Sales.SalesOrderHeader do
-            joinOn d in Sales.SalesOrderDetail
-            on' (o.SalesOrderID = d.SalesOrderID)
+            join' d in Sales.SalesOrderDetail; on' (o.SalesOrderID = d.SalesOrderID)
             select o
         }
         |> toSql
@@ -828,8 +827,7 @@ let ``Inner Join with on' - Multi Column``() =
     let sql =
         select {
             for o in Sales.SalesOrderHeader do
-            joinOn d in Sales.SalesOrderDetail
-            on' (o.SalesOrderID = d.SalesOrderID && o.ModifiedDate = d.ModifiedDate)
+            join' d in Sales.SalesOrderDetail; on' (o.SalesOrderID = d.SalesOrderID && o.ModifiedDate = d.ModifiedDate)
             select o
         }
         |> toSql
@@ -841,8 +839,7 @@ let ``Left Join with on' - Single Column``() =
     let sql =
         select {
             for o in Sales.SalesOrderHeader do
-            leftJoinOn d in Sales.SalesOrderDetail
-            on' (o.SalesOrderID = d.Value.SalesOrderID)
+            leftJoin' d in Sales.SalesOrderDetail; on' (o.SalesOrderID = d.Value.SalesOrderID)
             select o
         }
         |> toSql
@@ -854,8 +851,7 @@ let ``Left Join with on' - Multi Column``() =
     let sql =
         select {
             for o in Sales.SalesOrderHeader do
-            leftJoinOn d in Sales.SalesOrderDetail
-            on' (o.SalesOrderID = d.Value.SalesOrderID && o.ModifiedDate = d.Value.ModifiedDate)
+            leftJoin' d in Sales.SalesOrderDetail; on' (o.SalesOrderID = d.Value.SalesOrderID && o.ModifiedDate = d.Value.ModifiedDate)
             select o
         }
         |> toSql
@@ -867,10 +863,9 @@ let ``Left Join with on' - Column to Value Condition``() =
     let sql =
         select {
             for o in Sales.SalesOrderHeader do
-            leftJoinOn d in Sales.SalesOrderDetail
-            on' (o.SalesOrderID = d.Value.SalesOrderID && d.Value.OrderQty > 5s)
+            leftJoin' d in Sales.SalesOrderDetail; on' (o.SalesOrderID = d.Value.SalesOrderID && d.Value.OrderQty > 5s)
             select o
-        }
+        }   
         |> toSql
 
     sql.Contains("LEFT JOIN [Sales].[SalesOrderDetail] AS [d] ON ([o].[SalesOrderID] = [d].[SalesOrderID] AND [d].[OrderQty] > @p0)") =! true
@@ -908,10 +903,8 @@ let ``Multiple Left Joins with on' - The Motivating Use Case``() =
     let sql =
         select {
             for o in Sales.SalesOrderHeader do
-            leftJoinOn d1 in Sales.SalesOrderDetail
-            on' (o.SalesOrderID = d1.Value.SalesOrderID && d1.Value.OrderQty > 1s)
-            leftJoinOn d2 in Sales.SalesOrderDetail
-            on' (o.SalesOrderID = d2.Value.SalesOrderID && d2.Value.OrderQty > 5s)
+            leftJoin' d1 in Sales.SalesOrderDetail; on' (o.SalesOrderID = d1.Value.SalesOrderID && d1.Value.OrderQty > 1s)
+            leftJoin' d2 in Sales.SalesOrderDetail; on' (o.SalesOrderID = d2.Value.SalesOrderID && d2.Value.OrderQty > 5s)
             select (o, d1, d2)
         }
         |> toSql
