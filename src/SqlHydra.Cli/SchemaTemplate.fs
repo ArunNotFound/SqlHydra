@@ -395,14 +395,6 @@ module HydraBuilders =
 
             /// Opens a connection and returns a new QueryContext.
             OpenContext: unit -> QueryContext
-
-            /// Creates a new QueryContext for this query and disposes it automatically.
-            Create: ContextType
-
-            /// Opens a new QueryContext and wraps it in Shared. 
-            /// You are responsible for disposing this context.
-            /// The select builder will NOT dispose the context.            
-            OpenShared: unit -> ContextType
         }}
         /// Creates a provider-specific QueryContextFactory for the given database connection string.
         static member Initialize(connectionString: string) =
@@ -420,8 +412,6 @@ module HydraBuilders =
                 ConnectionString = connectionString
                 OpenConnection = openConn
                 OpenContext = openCtx
-                Create = Create (fun () -> openCtx())
-                OpenShared = fun () -> Shared (openCtx())
             }}
             """
 
