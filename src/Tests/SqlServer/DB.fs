@@ -10,13 +10,10 @@ let server = "localhost,12019"
 
 let connectionString = $@"Server={server};Database=AdventureWorks;User=sa;Password=Password#123;Connect Timeout=3;TrustServerCertificate=True"
 
-let getConnection() = 
-    new SqlConnection(connectionString)
+let db = AdventureWorksNet8.HydraBuilders.QueryContextFactory.create connectionString
 
 let openConnection() = 
-    let conn = getConnection()
-    conn.Open()
-    conn
+    db.OpenConnection() :?> SqlConnection
 
 let toSql (query: SqlHydra.Query.SelectQuery) = 
     let compiler = SqlKata.Compilers.SqlServerCompiler()

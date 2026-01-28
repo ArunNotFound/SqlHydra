@@ -21,9 +21,7 @@ open Microsoft.SqlServer.Types
 open HydraBuilders
 
 let openContext() = 
-    let compiler = SqlKata.Compilers.SqlServerCompiler()
-    let conn = openConnection()
-    new QueryContext(conn, compiler)
+    db.OpenContext()
 
 let stubbedErrorLog = 
     {

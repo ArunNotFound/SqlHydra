@@ -15,17 +15,12 @@ open SqlServer.AdventureWorksNet9
 open SqlServer.AdventureWorksNet10
 #endif
 
-let openContext() =
-    let compiler = SqlKata.Compilers.SqlServerCompiler()
-    let conn = openConnection()
-    new QueryContext(conn, compiler)
-
-let selectAsync' = HydraBuilders.selectAsync
+open HydraBuilders
 
 [<Test>]
 let ``selectAsync - no select``() = async {
     let! results = 
-        selectAsync' openContext {
+        selectAsync db {
             for o in Sales.SalesOrderHeader do
             join d in Sales.SalesOrderDetail on (o.SalesOrderID = d.SalesOrderID)
             take 10
@@ -38,7 +33,7 @@ let ``selectAsync - no select``() = async {
 [<Test>]
 let ``selectAsync - select p``() = async {
     let! results = 
-        selectAsync' openContext {
+        selectAsync db {
             for p in Person.Person do
             take 10
             select p
@@ -50,7 +45,7 @@ let ``selectAsync - select p``() = async {
 [<Test>]
 let ``selectAsync - toArray``() = async {
     let! results = 
-        selectAsync' openContext {
+        selectAsync db {
             for p in Person.Person do
             take 10
             select p
@@ -63,7 +58,7 @@ let ``selectAsync - toArray``() = async {
 [<Test>]
 let ``selectAsync - mapList column``() = async {
     let! results = 
-        selectAsync' openContext {
+        selectAsync db {
             for p in Person.Person do
             take 10
             mapList p.FirstName
@@ -75,7 +70,7 @@ let ``selectAsync - mapList column``() = async {
 [<Test>]
 let ``selectAsync - select entity - mapSeq column``() = async {
     let! results = 
-        selectAsync' openContext {
+        selectAsync db {
             for p in Person.Person do
             take 10
             select p
@@ -88,7 +83,7 @@ let ``selectAsync - select entity - mapSeq column``() = async {
 [<Test>]
 let ``selectAsync - select columns into - mapList column``() = async {
     let! results = 
-        selectAsync' openContext {
+        selectAsync db {
             for p in Person.Person do
             take 10
             select (p.FirstName, p.LastName) into (fname, lname)
@@ -101,7 +96,7 @@ let ``selectAsync - select columns into - mapList column``() = async {
 [<Test>]
 let ``selectAsync - count``() = async {
     let! results = 
-        selectAsync' openContext {
+        selectAsync db {
             for p in Person.Person do
             count
         }
@@ -112,7 +107,7 @@ let ``selectAsync - count``() = async {
 [<Test>]
 let ``selectAsync - tryHead - Selected``() = async {
     let! result = 
-        selectAsync' openContext {
+        selectAsync db {
             for p in Person.Person do
             take 1
             tryHead
@@ -124,7 +119,7 @@ let ``selectAsync - tryHead - Selected``() = async {
 [<Test>]
 let ``selectAsync - tryHead - Mapped``() = async {
     let! result = 
-        selectAsync' openContext {
+        selectAsync db {
             for p in Person.Person do
             take 1
             mapSeq $"{p.FirstName} {p.LastName}"
