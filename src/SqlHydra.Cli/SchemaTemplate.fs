@@ -384,23 +384,13 @@ module HydraBuilders =
     /// Builds a select query with a QueryContext - returns an Async query result
     let selectAsync ct = selectAsync<'Selected, 'Mapped, {reader.ReaderType}> HydraReader.Read ct
 
-    /// Factory for creating QueryContext instances.
-    type QueryContextFactory =
-        {{
-            /// The database connection string.
-            ConnectionString: string
+    module QueryContextFactory = 
 
-            /// Opens a new provider-specific connection.
-            OpenConnection: unit -> {connectionType}
-
-            /// Opens a connection and returns a new QueryContext.
-            OpenContext: unit -> QueryContext
-        }}
         /// Creates a provider-specific QueryContextFactory for the given database connection string.
-        static member Initialize(connectionString: string) =
+        let create (connectionString: string) : QueryContextFactory =
             let compiler = {compiler}
 
-            let openConn () =
+            let openConn () : System.Data.Common.DbConnection =
                 let conn = new {connectionType}(connectionString)
                 conn.Open()
                 conn
@@ -413,7 +403,7 @@ module HydraBuilders =
                 OpenConnection = openConn
                 OpenContext = openCtx
             }}
-            """
+    """
 
         }
 
