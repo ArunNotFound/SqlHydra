@@ -15,13 +15,12 @@ open SqlServer.AdventureWorksNet9
 open SqlServer.AdventureWorksNet10
 #endif
 
-let openContext() = 
+let openContext() =
     let compiler = SqlKata.Compilers.SqlServerCompiler()
     let conn = openConnection()
     new QueryContext(conn, compiler)
 
-let selectAsync' ct = 
-    selectAsync<'Selected, 'Mapped, 'Reader> HydraReader.Read ct
+let selectAsync' = HydraBuilders.selectAsync
 
 [<Test>]
 let ``selectAsync - no select``() = async {

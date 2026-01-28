@@ -15,13 +15,12 @@ open SqlServer.AdventureWorksNet9
 open SqlServer.AdventureWorksNet10
 #endif
 
-let openContext() = 
+let openContext() =
     let compiler = SqlKata.Compilers.SqlServerCompiler()
     let conn = openConnection()
     new QueryContext(conn, compiler)
 
-let selectTask' ct = 
-    selectTask<'Selected, 'Mapped, 'Reader> HydraReader.Read ct
+let selectTask' = HydraBuilders.selectTask
 
 [<Test>]
 let ``selectTask - no select``() = task {

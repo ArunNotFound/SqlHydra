@@ -3305,12 +3305,12 @@ module HydraBuilders =
     open SqlHydra.Query
 
     /// Builds a select query with a QueryContext - returns a Task query result
-    let selectTask ct =
-        selectTask<'Selected, 'Mapped, Microsoft.Data.SqlClient.SqlDataReader> HydraReader.Read ct
+    let inline selectTask ct =
+        selectTask<'Selected, 'Mapped, Microsoft.Data.SqlClient.SqlDataReader, _> HydraReader.Read ct
 
     /// Builds a select query with a QueryContext - returns an Async query result
-    let selectAsync ct =
-        selectAsync<'Selected, 'Mapped, Microsoft.Data.SqlClient.SqlDataReader> HydraReader.Read ct
+    let inline selectAsync ct =
+        selectAsync<'Selected, 'Mapped, Microsoft.Data.SqlClient.SqlDataReader, _> HydraReader.Read ct
 
     module QueryContextFactory =
 
@@ -3318,13 +3318,21 @@ module HydraBuilders =
         let create (connectionString: string) : QueryContextFactory =
             let compiler = SqlKata.Compilers.SqlServerCompiler()
 
-            let openConn () : System.Data.Common.DbConnection =
-                let conn = new Microsoft.Data.SqlClient.SqlConnection(connectionString)
+            let createConn () : System.Data.Common.DbConnection =
+                new Microsoft.Data.SqlClient.SqlConnection(connectionString)
+
+            let openContext () =
+                let conn = createConn ()
                 conn.Open()
-                conn
+                new QueryContext(conn, compiler)
 
-            let openCtx () = new QueryContext(openConn (), compiler)
+            let openContextAsync () =
+                task {
+                    let conn = createConn ()
+                    do! conn.OpenAsync()
+                    return new QueryContext(conn, compiler)
+                }
 
-            { ConnectionString = connectionString
-              OpenConnection = openConn
-              OpenContext = openCtx }
+            { CreateConnection = createConn
+              OpenContext = openContext
+              OpenContextAsync = openContextAsync }

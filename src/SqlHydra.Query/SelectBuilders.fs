@@ -11,7 +11,7 @@ open SqlKata
 
 /// The context type that determines how the query context is created and disposed.
 /// Can be implicitly converted from a QueryContext, a function that creates a QueryContext, a Task that creates a QueryContext, or an Async that creates a QueryContext.
-type ContextType = 
+type ContextType =
     /// A new QueryContext will be created and disposed within the select builder.
     | Create of create: (unit -> QueryContext)
     /// A new QueryContext will be created and disposed within the select builder.
@@ -24,6 +24,37 @@ type ContextType =
     static member op_Implicit(createFn: unit -> QueryContext) = Create createFn
     static member op_Implicit(createFn: unit -> Task<QueryContext>) = CreateTask createFn
     static member op_Implicit(createFn: unit -> Async<QueryContext>) = CreateAsync createFn
+
+/// SRTP-based context type resolution for selectTask/selectAsync
+[<RequireQualifiedAccess>]
+module ContextTypeResolver =
+
+    /// Helper type for SRTP overload resolution using the $ operator pattern
+    type Resolver =
+        | Resolver
+
+        // Direct ContextType - pass through
+        static member inline ($) (Resolver, ct: ContextType) = ct
+
+        // QueryContext - wrap in Shared
+        static member inline ($) (Resolver, ctx: QueryContext) = Shared ctx
+
+        // unit -> QueryContext - wrap in Create
+        static member inline ($) (Resolver, createFn: unit -> QueryContext) = Create createFn
+
+        // unit -> Task<QueryContext> - wrap in CreateTask
+        static member inline ($) (Resolver, createFn: unit -> Task<QueryContext>) = CreateTask createFn
+
+        // unit -> Async<QueryContext> - wrap in CreateAsync
+        static member inline ($) (Resolver, createFn: unit -> Async<QueryContext>) = CreateAsync createFn
+
+        // Explicit overload for QueryContextFactory (now in SqlHydra.Query)
+        static member inline ($) (Resolver, factory: QueryContextFactory) =
+            CreateTask factory.OpenContextAsync
+
+    /// Inline function that resolves any supported type to ContextType
+    let inline resolve< ^T when (Resolver or ^T) : (static member ($) : Resolver * ^T -> ContextType)> (input: ^T) : ContextType =
+        Resolver $ input
 
 module ContextUtils = 
     let private tryOpen (ctx: QueryContext) = 
@@ -654,18 +685,34 @@ type SelectAsyncBuilder<'Selected, 'Mapped, 'Reader & #DbDataReader> (
 
 
 /// Builds and returns a select query that can be manually run by piping into QueryContext read methods
-let select<'Selected, 'Mapped> = 
+let select<'Selected, 'Mapped> =
     SelectQueryBuilder<'Selected, 'Mapped>()
 
-/// Builds a select query with a HydraReader.Read function and QueryContext - returns an Async query result
-let selectAsync<'Selected, 'Mapped, 'Reader & #DbDataReader> (readEntityBuilder: 'Reader -> (unit -> 'Selected)) ct = 
-    SelectAsyncBuilder<'Selected, 'Mapped, 'Reader>(readEntityBuilder, ct)
+/// Builds a select query with a HydraReader.Read function and context source - returns an Async query result
+let inline selectAsync< ^Selected, ^Mapped, 'Reader, ^Context
+    when 'Reader :> DbDataReader
+    and (ContextTypeResolver.Resolver or ^Context) : (static member ($) : ContextTypeResolver.Resolver * ^Context -> ContextType)>
+    (readEntityBuilder: 'Reader -> (unit -> ^Selected))
+    (ctSource: ^Context) =
+    let ct = ContextTypeResolver.resolve ctSource
+    SelectAsyncBuilder< ^Selected, ^Mapped, 'Reader>(readEntityBuilder, ct)
 
-/// Builds a select query with a HydraReader.Read function and QueryContext - returns a Task query result
-let selectTask<'Selected, 'Mapped, 'Reader & #DbDataReader> (readEntityBuilder: 'Reader -> (unit -> 'Selected)) ct = 
-    SelectTaskBuilder<'Selected, 'Mapped, 'Reader>(readEntityBuilder, ct)
-    
-/// Builds a select query with a HydraReader.Read function, QueryContext, and CancellationToken - returns a Task query result
-let selectTaskCancellable<'Selected, 'Mapped, 'Reader & #DbDataReader> (readEntityBuilder: 'Reader -> (unit -> 'Selected)) ct (cancellationToken: CancellationToken) = 
-    SelectTaskBuilder<'Selected, 'Mapped, 'Reader>(readEntityBuilder, ct, cancellationToken)
+/// Builds a select query with a HydraReader.Read function and context source - returns a Task query result
+let inline selectTask< ^Selected, ^Mapped, 'Reader, ^Context
+    when 'Reader :> DbDataReader
+    and (ContextTypeResolver.Resolver or ^Context) : (static member ($) : ContextTypeResolver.Resolver * ^Context -> ContextType)>
+    (readEntityBuilder: 'Reader -> (unit -> ^Selected))
+    (ctSource: ^Context) =
+    let ct = ContextTypeResolver.resolve ctSource
+    SelectTaskBuilder< ^Selected, ^Mapped, 'Reader>(readEntityBuilder, ct)
+
+/// Builds a select query with a HydraReader.Read function, context source, and CancellationToken - returns a Task query result
+let inline selectTaskCancellable< ^Selected, ^Mapped, 'Reader, ^Context
+    when 'Reader :> DbDataReader
+    and (ContextTypeResolver.Resolver or ^Context) : (static member ($) : ContextTypeResolver.Resolver * ^Context -> ContextType)>
+    (readEntityBuilder: 'Reader -> (unit -> ^Selected))
+    (ctSource: ^Context)
+    (cancellationToken: CancellationToken) =
+    let ct = ContextTypeResolver.resolve ctSource
+    SelectTaskBuilder< ^Selected, ^Mapped, 'Reader>(readEntityBuilder, ct, cancellationToken)
 

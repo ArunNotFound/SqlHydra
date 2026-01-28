@@ -379,10 +379,10 @@ module HydraBuilders =
     open SqlHydra.Query
 
     /// Builds a select query with a QueryContext - returns a Task query result
-    let selectTask ct = selectTask<'Selected, 'Mapped, {reader.ReaderType}> HydraReader.Read ct
+    let inline selectTask ct = selectTask<'Selected, 'Mapped, {reader.ReaderType}, _> HydraReader.Read ct
 
     /// Builds a select query with a QueryContext - returns an Async query result
-    let selectAsync ct = selectAsync<'Selected, 'Mapped, {reader.ReaderType}> HydraReader.Read ct
+    let inline selectAsync ct = selectAsync<'Selected, 'Mapped, {reader.ReaderType}, _> HydraReader.Read ct
 
     module QueryContextFactory = 
 

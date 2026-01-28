@@ -658,4 +658,44 @@ type HydraReader(reader: System.Data.Common.DbDataReader) =
     
         /// Builds a select query with a QueryContext - returns an Async query result
         let selectAsync ct = selectAsync<'Selected, 'Mapped, System.Data.Common.DbDataReader> HydraReader.Read ct
-                    
+    
+        /// Factory for creating QueryContext instances.
+        type QueryContextFactory =
+            {
+                /// The database connection string.
+                ConnectionString: string
+    
+                /// Opens a new provider-specific connection.
+                OpenConnection: unit -> Microsoft.Data.Sqlite.SqliteConnection
+    
+                /// Opens a connection and returns a new QueryContext.
+                OpenContext: unit -> QueryContext
+    
+                /// Creates a new QueryContext for this query and disposes it automatically.
+                Create: ContextType
+    
+                /// Opens a new QueryContext and wraps it in Shared. 
+                /// You are responsible for disposing this context.
+                /// The select builder will NOT dispose the context.            
+                OpenShared: unit -> ContextType
+            }
+            /// Creates a provider-specific QueryContextFactory for the given database connection string.
+            static member Initialize(connectionString: string) =
+                let compiler = SqlKata.Compilers.SqliteCompiler()
+    
+                let openConn () =
+                    let conn = new Microsoft.Data.Sqlite.SqliteConnection(connectionString)
+                    conn.Open()
+                    conn
+    
+                let openCtx () =
+                    new QueryContext(openConn(), compiler)
+    
+                {
+                    ConnectionString = connectionString
+                    OpenConnection = openConn
+                    OpenContext = openCtx
+                    Create = Create (fun () -> openCtx())
+                    OpenShared = fun () -> Shared (openCtx())
+                }
+                

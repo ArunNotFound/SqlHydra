@@ -7,7 +7,9 @@
       "Bash(dotnet test:*)",
       "Bash(dotnet build:*)",
       "WebFetch(domain:github.com)",
-      "Bash(gh issue view:*)"
+      "Bash(gh issue view:*)",
+      "Bash(dotnet run:*)",
+      "Bash(cat:*)"
     ],
     "deny": []
   }
