@@ -390,18 +390,25 @@ module HydraBuilders =
         let create (connectionString: string) : QueryContextFactory =
             let compiler = {compiler}
 
-            let openConn () : System.Data.Common.DbConnection =
-                let conn = new {connectionType}(connectionString)
-                conn.Open()
-                conn
+            let createConn () : System.Data.Common.DbConnection =
+                new {connectionType}(connectionString)
 
-            let openCtx () =
-                new QueryContext(openConn(), compiler)
+            let openContext () = 
+                let conn = createConn ()
+                conn.Open()
+                new QueryContext(conn, compiler)
+
+            let openContextAsync () = 
+                task {{
+                    let conn = createConn ()
+                    do! conn.OpenAsync()
+                    return new QueryContext(conn, compiler)
+                }}
 
             {{
-                ConnectionString = connectionString
-                OpenConnection = openConn
-                OpenContext = openCtx
+                CreateConnection = createConn
+                OpenContext = openContext
+                OpenContextAsync = openContextAsync
             }}
     """
 
