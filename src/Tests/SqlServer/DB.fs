@@ -1,6 +1,7 @@
 ﻿module SqlServer.DB
 
 open Microsoft.Data.SqlClient
+open SqlHydra.Query
 
 #if DOCKERHOST // devcontainer
 let server = "mssql"
@@ -10,7 +11,7 @@ let server = "localhost,12019"
 
 let connectionString = $@"Server={server};Database=AdventureWorks;User=sa;Password=Password#123;Connect Timeout=3;TrustServerCertificate=True"
 
-let db = AdventureWorksNet8.HydraBuilders.QueryContextFactory.create connectionString
+let db = AdventureWorksNet8.HydraBuilders.QueryContextFactory.Create connectionString
 
 let openConnection() = 
     db.OpenConnection() :?> SqlConnection

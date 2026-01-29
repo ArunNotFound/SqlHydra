@@ -34,7 +34,7 @@
 		<Compile Include="OnConflict.fs" />
 		<Compile Include="OutputClause.fs" />
 		<Compile Include="QueryContext.fs" />
-		<Compile Include="QueryContextFactory.fs" />
+		<Compile Include="IQueryContextFactory.fs" />
 		<Compile Include="SelectBuilders.fs" />
 		<Compile Include="InsertBuilders.fs" />
 		<Compile Include="UpdateBuilders.fs" />

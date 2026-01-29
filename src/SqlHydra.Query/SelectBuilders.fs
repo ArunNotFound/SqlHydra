@@ -48,8 +48,8 @@ module ContextTypeResolver =
         // unit -> Async<QueryContext> - wrap in CreateAsync
         static member inline ($) (Resolver, createFn: unit -> Async<QueryContext>) = CreateAsync createFn
 
-        // Explicit overload for QueryContextFactory (now in SqlHydra.Query)
-        static member inline ($) (Resolver, factory: QueryContextFactory) =
+        // Explicit overload for IQueryContextFactory
+        static member inline ($) (Resolver, factory: IQueryContextFactory) =
             CreateTask factory.OpenContextAsync
 
     /// Inline function that resolves any supported type to ContextType

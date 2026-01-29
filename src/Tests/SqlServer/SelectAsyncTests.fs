@@ -18,7 +18,7 @@ open SqlServer.AdventureWorksNet10
 open HydraBuilders
 
 [<Test>]
-let ``selectAsync - no select``() = async {
+let ``selectAsync - no select``() = async {    
     let! results = 
         selectAsync db {
             for o in Sales.SalesOrderHeader do
