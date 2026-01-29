@@ -654,8 +654,42 @@ type HydraReader(reader: System.Data.Common.DbDataReader) =
         open SqlHydra.Query
     
         /// Builds a select query with a QueryContext - returns a Task query result
-        let selectTask ct = selectTask<'Selected, 'Mapped, System.Data.Common.DbDataReader> HydraReader.Read ct
+        let inline selectTask ct = selectTask<'Selected, 'Mapped, System.Data.Common.DbDataReader, _> HydraReader.Read ct
     
         /// Builds a select query with a QueryContext - returns an Async query result
-        let selectAsync ct = selectAsync<'Selected, 'Mapped, System.Data.Common.DbDataReader> HydraReader.Read ct
-                    
+        let inline selectAsync ct = selectAsync<'Selected, 'Mapped, System.Data.Common.DbDataReader, _> HydraReader.Read ct
+    
+        type QueryContextFactory =
+            {
+                CreateConnection: unit -> System.Data.Common.DbConnection
+                OpenContext: unit -> QueryContext
+                OpenContextAsync: unit -> System.Threading.Tasks.Task<QueryContext>
+            }
+            interface IQueryContextFactory with
+                member this.CreateConnection() = this.CreateConnection()
+                member this.OpenContext() = this.OpenContext()
+                member this.OpenContextAsync() = this.OpenContextAsync()
+            static member Create(connectionString: string) =
+                let compiler = SqlKata.Compilers.SqliteCompiler()
+    
+                let createConn () : System.Data.Common.DbConnection =
+                    new Microsoft.Data.Sqlite.SqliteConnection(connectionString)
+    
+                let openContext () =
+                    let conn = createConn ()
+                    conn.Open()
+                    new QueryContext(conn, compiler)
+    
+                let openContextAsync () =
+                    task {
+                        let conn = createConn ()
+                        do! conn.OpenAsync()
+                        return new QueryContext(conn, compiler)
+                    }
+    
+                {
+                    CreateConnection = createConn
+                    OpenContext = openContext
+                    OpenContextAsync = openContextAsync
+                }
+        

@@ -3,6 +3,16 @@
 open Microsoft.Data.SqlClient
 open SqlHydra.Query
 
+#if NET8_0
+open SqlServer.AdventureWorksNet8
+#endif
+#if NET9_0
+open SqlServer.AdventureWorksNet9
+#endif
+#if NET10_0
+open SqlServer.AdventureWorksNet10
+#endif
+
 #if DOCKERHOST // devcontainer
 let server = "mssql"
 #else
@@ -11,7 +21,7 @@ let server = "localhost,12019"
 
 let connectionString = $@"Server={server};Database=AdventureWorks;User=sa;Password=Password#123;Connect Timeout=3;TrustServerCertificate=True"
 
-let db = AdventureWorksNet8.HydraBuilders.QueryContextFactory.Create connectionString
+let db = HydraBuilders.QueryContextFactory.Create connectionString
 
 let openConnection() = 
     db.OpenConnection() :?> SqlConnection

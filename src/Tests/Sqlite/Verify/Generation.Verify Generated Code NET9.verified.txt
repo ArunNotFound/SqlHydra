@@ -654,48 +654,42 @@ type HydraReader(reader: System.Data.Common.DbDataReader) =
         open SqlHydra.Query
     
         /// Builds a select query with a QueryContext - returns a Task query result
-        let selectTask ct = selectTask<'Selected, 'Mapped, System.Data.Common.DbDataReader> HydraReader.Read ct
+        let inline selectTask ct = selectTask<'Selected, 'Mapped, System.Data.Common.DbDataReader, _> HydraReader.Read ct
     
         /// Builds a select query with a QueryContext - returns an Async query result
-        let selectAsync ct = selectAsync<'Selected, 'Mapped, System.Data.Common.DbDataReader> HydraReader.Read ct
+        let inline selectAsync ct = selectAsync<'Selected, 'Mapped, System.Data.Common.DbDataReader, _> HydraReader.Read ct
     
-        /// Factory for creating QueryContext instances.
         type QueryContextFactory =
             {
-                /// The database connection string.
-                ConnectionString: string
-    
-                /// Opens a new provider-specific connection.
-                OpenConnection: unit -> Microsoft.Data.Sqlite.SqliteConnection
-    
-                /// Opens a connection and returns a new QueryContext.
+                CreateConnection: unit -> System.Data.Common.DbConnection
                 OpenContext: unit -> QueryContext
-    
-                /// Creates a new QueryContext for this query and disposes it automatically.
-                Create: ContextType
-    
-                /// Opens a new QueryContext and wraps it in Shared. 
-                /// You are responsible for disposing this context.
-                /// The select builder will NOT dispose the context.            
-                OpenShared: unit -> ContextType
+                OpenContextAsync: unit -> System.Threading.Tasks.Task<QueryContext>
             }
-            /// Creates a provider-specific QueryContextFactory for the given database connection string.
-            static member Initialize(connectionString: string) =
+            interface IQueryContextFactory with
+                member this.CreateConnection() = this.CreateConnection()
+                member this.OpenContext() = this.OpenContext()
+                member this.OpenContextAsync() = this.OpenContextAsync()
+            static member Create(connectionString: string) =
                 let compiler = SqlKata.Compilers.SqliteCompiler()
     
-                let openConn () =
-                    let conn = new Microsoft.Data.Sqlite.SqliteConnection(connectionString)
-                    conn.Open()
-                    conn
+                let createConn () : System.Data.Common.DbConnection =
+                    new Microsoft.Data.Sqlite.SqliteConnection(connectionString)
     
-                let openCtx () =
-                    new QueryContext(openConn(), compiler)
+                let openContext () =
+                    let conn = createConn ()
+                    conn.Open()
+                    new QueryContext(conn, compiler)
+    
+                let openContextAsync () =
+                    task {
+                        let conn = createConn ()
+                        do! conn.OpenAsync()
+                        return new QueryContext(conn, compiler)
+                    }
     
                 {
-                    ConnectionString = connectionString
-                    OpenConnection = openConn
-                    OpenContext = openCtx
-                    Create = Create (fun () -> openCtx())
-                    OpenShared = fun () -> Shared (openCtx())
+                    CreateConnection = createConn
+                    OpenContext = openContext
+                    OpenContextAsync = openContextAsync
                 }
-                
+        
