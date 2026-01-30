@@ -46,6 +46,7 @@
 		<Compile Include="OracleExtensions.fs" />
 		<Compile Include="MySqlExtensions.fs" />
 		<Compile Include="DataReaderExtensions.fs" />
+		<Compile Include="VersionCheck.fs" />
 	</ItemGroup>
 
 	<ItemGroup>

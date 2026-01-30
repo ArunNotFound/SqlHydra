@@ -24,7 +24,8 @@ let cfg =
 let lazySchema = lazy OracleSchemaProvider.getSchema (cfg, false)
 
 let getCode cfg = 
-    SchemaTemplate.generate cfg Provider.provider lazySchema.Value "---" false
+    let version = Version.get()
+    SchemaTemplate.generate cfg Provider.provider lazySchema.Value version false
 
 let inCode (str: string) cfg = 
     let code = getCode cfg

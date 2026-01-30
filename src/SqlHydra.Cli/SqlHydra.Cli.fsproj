@@ -40,11 +40,11 @@
 		<Compile Include="Npgsql\NpgsqlDataTypes.fs" />
 		<Compile Include="Npgsql\NpgsqlSchemaProvider.fs" />
 		<Compile Include="Npgsql\Provider.fs" />
+		<Compile Include="Version.fs" />
 		<Compile Include="SchemaTemplate.fs" />
 		<Compile Include="TomlConfigParser.fs" />
 		<Compile Include="Fsproj.fs" />
 		<Compile Include="Console.fs" />
-		<Compile Include="Version.fs" />
 		<Compile Include="Program.fs" />
 	</ItemGroup>
 

@@ -12,7 +12,8 @@ let ``Schema Template Test - Npgsql`` () =
         }
     let info = Npgsql.Provider.provider
     let schema = Npgsql.NpgsqlSchemaProvider.getSchema (cfg, false)
-    let output = SchemaTemplate.generate cfg info schema "1.0.0" false
+    let version = Version.get()
+    let output = SchemaTemplate.generate cfg info schema version false
     printfn $"Output:\n{output}"
 
 [<Test>]
@@ -29,7 +30,8 @@ let ``Schema Template Test - SqlServer`` () =
         }
     let info = SqlServer.Provider.provider
     let schema = SqlServer.SqlServerSchemaProvider.getSchema (cfg, false)
-    let output = SchemaTemplate.generate cfg info schema "1.0.0"
+    let version = Version.get()
+    let output = SchemaTemplate.generate cfg info schema version
     printfn $"Output:\n{output}"
     // Write output to sqlserver.fs
     //System.IO.File.WriteAllText("_sqlserver.fs", output)

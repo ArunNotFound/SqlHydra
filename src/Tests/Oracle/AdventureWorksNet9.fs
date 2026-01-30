@@ -4,6 +4,11 @@ namespace Oracle.AdventureWorksNet9
 open SqlHydra
 open SqlHydra.Query.Table
 
+module Version =
+    let cli = System.Version(3, 3, 0)
+    let ns = "Oracle.AdventureWorksNet9"
+    SqlHydra.Query.VersionCheck.assertIsCompatible cli ns
+
 [<AutoOpen>]
 module ColumnReaders =
     type Column(reader: System.Data.IDataReader, getOrdinal: string -> int, column) =

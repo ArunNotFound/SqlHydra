@@ -10,7 +10,7 @@ type Args =
         Provider: Provider
         TomlFile: FileInfo
         Project: FileInfo
-        Version: string
+        Version: Version.InformationalVersion
         ConnectionString: string option
     }
 
@@ -148,7 +148,7 @@ let printLegacyStatus (isLegacy: bool) =
 /// Creates a sqlhydra-*.toml file if necessary.
 let getOrCreateConfig (args: Args) = 
     AnsiConsole.WriteLine()
-    AnsiConsole.MarkupLine($"{args.Provider.Name} [gold1]v{args.Version}[/]")
+    AnsiConsole.MarkupLine($"{args.Provider.Name} [gold1]v%s{args.Version.InformationalVersion}[/]")
 
     match tryLoadConfig(args.TomlFile) with
     | Valid cfg -> 

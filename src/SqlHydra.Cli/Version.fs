@@ -18,7 +18,7 @@ type InformationalVersion =
 /// Ex: 1.0.0-alpha.1
 /// Ex: 1.0.0-beta.1
 /// Ex: 1.0.0
-let getInformationalVersion (info: AssemblyInformationalVersionAttribute) = 
+let private getInformationalVersion (info: AssemblyInformationalVersionAttribute) = 
     match info.InformationalVersion.Split([|'-'; '+'|], StringSplitOptions.RemoveEmptyEntries) with
     | [| root; suffix; _ |] -> 
         { InformationalVersion = $"{root}-{suffix}"; Version = Version(root); PreReleaseSuffix = Some suffix }
@@ -27,13 +27,13 @@ let getInformationalVersion (info: AssemblyInformationalVersionAttribute) =
     | _ -> 
         failwith "Invalid version format"
 
-let getInformationalVersionAttribute assemblyPath = 
+let private getInformationalVersionAttribute assemblyPath = 
     Reflection.Assembly.LoadFrom(assemblyPath).GetCustomAttributes(typeof<AssemblyInformationalVersionAttribute>, false)
     |> Seq.cast<AssemblyInformationalVersionAttribute>
     |> Seq.head
 
+/// Gets the current assembly's informational version.
 let get () = 
-    Reflection.Assembly.GetAssembly(typeof<Console.Args>).Location
+    Reflection.Assembly.GetAssembly(typeof<InformationalVersion>).Location
     |> getInformationalVersionAttribute
     |> getInformationalVersion
-    |> _.InformationalVersion
