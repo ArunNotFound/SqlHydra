@@ -794,7 +794,7 @@ let ``Individual column from a leftJoin table should be optional if Some``() =
 LEFT JOIN [Sales].[SalesOrderDetail] AS [d] ON ([o].[SalesOrderID] = [d].[SalesOrderID])"""
 
 [<Test>]
-let ``Individual column from a leftJoin table should be optional if Option.map``() =
+let ``Individual column from a leftJoin table should be optional if Option map``() =
     let query =
         select {
             for o in Sales.SalesOrderHeader do
