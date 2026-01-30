@@ -20,8 +20,7 @@ let server = "localhost,12019"
 #endif
 
 let connectionString = $@"Server={server};Database=AdventureWorks;User=sa;Password=Password#123;Connect Timeout=3;TrustServerCertificate=True"
-
-let db = HydraBuilders.QueryContextFactory.Create connectionString
+let db = QueryContextFactory.Create connectionString
 
 let openConnection() = 
     db.OpenConnection() :?> SqlConnection

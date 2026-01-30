@@ -679,6 +679,7 @@ type HydraReader(reader: System.Data.Common.DbDataReader) =
 
 
 /// Provides select builders that use the generated HydraReader.Read.
+[<AutoOpen>]
 module HydraBuilders =
     open SqlHydra.Query
 
@@ -690,34 +691,36 @@ module HydraBuilders =
     let inline selectAsync ct =
         selectAsync<'Selected, 'Mapped, System.Data.Common.DbDataReader, _> HydraReader.Read ct
 
-    type QueryContextFactory =
-        { CreateConnection: unit -> System.Data.Common.DbConnection
-          OpenContext: unit -> QueryContext
-          OpenContextAsync: unit -> System.Threading.Tasks.Task<QueryContext> }
+open SqlHydra.Query
 
-        interface IQueryContextFactory with
-            member this.CreateConnection() = this.CreateConnection()
-            member this.OpenContext() = this.OpenContext()
-            member this.OpenContextAsync() = this.OpenContextAsync()
+type QueryContextFactory =
+    { CreateConnection: unit -> System.Data.Common.DbConnection
+      OpenContext: unit -> QueryContext
+      OpenContextAsync: unit -> System.Threading.Tasks.Task<QueryContext> }
 
-        static member Create(connectionString: string) =
-            let compiler = SqlKata.Compilers.SqliteCompiler()
+    interface IQueryContextFactory with
+        member this.CreateConnection() = this.CreateConnection()
+        member this.OpenContext() = this.OpenContext()
+        member this.OpenContextAsync() = this.OpenContextAsync()
 
-            let createConn () : System.Data.Common.DbConnection =
-                new Microsoft.Data.Sqlite.SqliteConnection(connectionString)
+    static member Create(connectionString: string) =
+        let compiler = SqlKata.Compilers.SqliteCompiler()
 
-            let openContext () =
+        let createConn () : System.Data.Common.DbConnection =
+            new Microsoft.Data.Sqlite.SqliteConnection(connectionString)
+
+        let openContext () =
+            let conn = createConn ()
+            conn.Open()
+            new QueryContext(conn, compiler)
+
+        let openContextAsync () =
+            task {
                 let conn = createConn ()
-                conn.Open()
-                new QueryContext(conn, compiler)
+                do! conn.OpenAsync()
+                return new QueryContext(conn, compiler)
+            }
 
-            let openContextAsync () =
-                task {
-                    let conn = createConn ()
-                    do! conn.OpenAsync()
-                    return new QueryContext(conn, compiler)
-                }
-
-            { CreateConnection = createConn
-              OpenContext = openContext
-              OpenContextAsync = openContextAsync }
+        { CreateConnection = createConn
+          OpenContext = openContext
+          OpenContextAsync = openContextAsync }

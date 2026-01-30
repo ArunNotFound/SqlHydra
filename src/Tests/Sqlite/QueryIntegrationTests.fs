@@ -333,13 +333,13 @@ let ``Distinct Test``() = task {
         ()
 
     let! results =
-        selectTask HydraReader.Read ctx {
+        selectTask ctx {
             for e in main.ErrorLog do
             select e.ErrorNumber
         }
 
     let! distinctResults =
-        selectTask HydraReader.Read ctx {
+        selectTask ctx {
             for e in main.ErrorLog do
             select e.ErrorNumber
             distinct
@@ -398,7 +398,7 @@ let ``OnConflictDoUpdate``() = task {
         } :> Task
 
     let queryAddress id = 
-        selectTask HydraReader.Read ctx {
+        selectTask ctx {
             for a in main.Address do
             where (a.AddressID = id)
             toList
@@ -439,7 +439,7 @@ let ``SqlFn - SQLite functions smoke test``() = task {
     use ctx = openContext()
 
     let! results =
-        selectTask HydraReader.Read ctx {
+        selectTask ctx {
             for a in main.Address do
             select (a.City, length a.City, upper a.City, ifnull(a.AddressLine2, "N/A"))
             take 1

@@ -489,14 +489,14 @@ let ``Distinct Test``() = task {
         Assert.AreEqual(rowsInserted, 3, "Expected 3 rows to be inserted")
 
         let! results =
-            selectTask HydraReader.Read ctx {
+            selectTask ctx {
                 for c in sales.currency do
                 where (c.currencycode =% "BC%")
                 select c.name
             }
 
         let! distinctResults =
-            selectTask HydraReader.Read ctx {
+            selectTask ctx {
                 for c in sales.currency do
                 where (c.currencycode =% "BC%")
                 select c.name
@@ -612,7 +612,7 @@ let ``Enum Tests``() = task {
     Assert.IsTrue(insertResults > 0, "Expected insert results > 0")
 
     let! query1Results = 
-        selectTask HydraReader.Read ctx {
+        selectTask ctx {
             for p in ext.person do
             select p
             toList
@@ -628,7 +628,7 @@ let ``Enum Tests``() = task {
     Assert.IsTrue(updateResults > 0, "Expected update results > 0")
 
     let! query2Results = 
-        selectTask HydraReader.Read ctx {
+        selectTask ctx {
             for p in ext.person do
             select p
             toList
@@ -719,7 +719,7 @@ let ``Query Employee Record with DateOnly``() = task {
     use ctx = openContext()
             
     let! employees =
-        selectTask HydraReader.Read ctx {
+        selectTask ctx {
             for e in humanresources.employee do
             select e
         }
@@ -732,7 +732,7 @@ let ``Query Employee Column with DateOnly``() = task {
     use ctx = openContext()
             
     let! employeeBirthDates =
-        selectTask HydraReader.Read ctx {
+        selectTask ctx {
             for e in humanresources.employee do
             select e.birthdate
         }
@@ -762,7 +762,7 @@ let ``Test Array Columns``() = task {
 
             
     let! query1Result = 
-        selectTask HydraReader.Read ctx {
+        selectTask ctx {
             for r in ext.arrays do
             select r
             tryHead
@@ -771,7 +771,7 @@ let ``Test Array Columns``() = task {
     Assert.AreEqual(query1Result, Some row, "Expected query result to match inserted row.")
 
     let! query2Result = 
-        selectTask HydraReader.Read ctx {
+        selectTask ctx {
             for r in ext.arrays do
             select (r.integer_array, r.text_array)
             tryHead
@@ -788,7 +788,7 @@ let ``Update Employee DateOnly``() = task {
     ctx.BeginTransaction()
             
     let! employees =
-        selectTask HydraReader.Read ctx {
+        selectTask ctx {
             for e in humanresources.employee do
             select e
         }
@@ -808,7 +808,7 @@ let ``Update Employee DateOnly``() = task {
     result =! 1
 
     let! refreshedEmp = 
-        selectTask HydraReader.Read ctx {
+        selectTask ctx {
             for e in humanresources.employee do
             where (e.businessentityid = emp.businessentityid)                    
             tryHead
@@ -828,7 +828,7 @@ let ``SqlFn - PostgreSQL functions smoke test``() = task {
     use ctx = openContext()
 
     let! results =
-        selectTask HydraReader.Read ctx {
+        selectTask ctx {
             for p in person.person do
             where (p.firstname = "Ken")
             select (p.firstname, char_length p.firstname, upper p.firstname, coalesce(p.middlename, "N/A"))
