@@ -28,20 +28,36 @@ The wizard will prompt you for connection string, output file, and namespace.
 dotnet add package SqlHydra.Query
 ```
 
-**4. Write your first query:**
+**4. Create QueryContext factory methods:**
 ```fsharp
-open MyApp.AdventureWorks              // Your generated namespace
-open MyApp.AdventureWorks.HydraBuilders
+module MyApp.Settings
+open SqlHydra.Query
+open Microsoft.SqlServer.Client
 
-let openContext () =
-    let compiler = SqlKata.Compilers.SqlServerCompiler()
-    let conn = new SqlConnection("your connection string")
+let openQueryContext connectionString =
+    let conn = new SqliteConnection(connectionString)
     conn.Open()
+    let compiler = SqliteCompiler() // Choose a SqlKata compiler
     new QueryContext(conn, compiler)
 
+type DB =
+    /// Defines the DB connection string.
+    { ConnectionString: string }
+    /// Opens a SQLite connection in a SqlHydra QueryContext.
+    member this.OpenContext() = openQueryContext this.ConnectionString
+    /// A factory method that allows a selectTask CE to Create a connection.
+    member this.Create = Create this.OpenContext
+```
+
+**5. Write your first query:**
+```fsharp
+open SqlHydra.Query
+open MyApp.AdventureWorks                  // Your generated namespace
+open MyApp.AdventureWorks.HydraBuilders    // Strongly typed select CE
+
 // Query with full type safety
-let getProducts minPrice =
-    selectTask openContext {
+let getProducts (db: DB) minPrice =
+    selectTask db.Create {
         for p in SalesLT.Product do
         where (p.ListPrice > minPrice)
         orderBy p.Name
@@ -145,8 +161,8 @@ Useful for data migrations or generating types with different filters.
 ### Basic Select
 
 ```fsharp
-let getProducts () =
-    selectTask openContext {
+let getProducts (db: DB)  =
+    selectTask db.Create {
         for p in SalesLT.Product do
         select p
     }
@@ -155,8 +171,8 @@ let getProducts () =
 ### Where Clauses
 
 ```fsharp
-let getExpensiveProducts minPrice =
-    selectTask openContext {
+let getExpensiveProducts (db: DB) minPrice =
+    selectTask db.Create {
         for p in SalesLT.Product do
         where (p.ListPrice > minPrice)
         select p
@@ -175,8 +191,8 @@ let getExpensiveProducts minPrice =
 
 ```fsharp
 // Filter where City starts with 'S'
-let getCitiesStartingWithS () =
-    selectTask openContext {
+let getCitiesStartingWithS (db: DB)  =
+    selectTask db.Create {
         for a in SalesLT.Address do
         where (a.City =% "S%")
         select a
@@ -188,8 +204,8 @@ let getCitiesStartingWithS () =
 Use `&&` to conditionally include/exclude where clauses:
 
 ```fsharp
-let getAddresses (cityFilter: string option) (zipFilter: string option) =
-    selectTask openContext {
+let getAddresses (db: DB) (cityFilter: string option) (zipFilter: string option) =
+    selectTask db.Create {
         for a in Person.Address do
         where (
             (cityFilter.IsSome && a.City = cityFilter.Value) &&
@@ -204,8 +220,8 @@ If `cityFilter.IsSome` is `false`, that clause is excluded from the query.
 
 ```fsharp
 // Inner join
-let getProductsWithCategory () =
-    selectTask openContext {
+let getProductsWithCategory (db: DB)  =
+    selectTask db.Create {
         for p in SalesLT.Product do
         join c in SalesLT.ProductCategory on (p.ProductCategoryID.Value = c.ProductCategoryID)
         select (p, c.Name)
@@ -213,8 +229,8 @@ let getProductsWithCategory () =
     }
 
 // Left join (joined table becomes Option)
-let getCustomerAddresses () =
-    selectTask openContext {
+let getCustomerAddresses (db: DB)  =
+    selectTask db.Create {
         for c in SalesLT.Customer do
         leftJoin a in SalesLT.Address on (c.AddressID = a.Value.AddressID)
         select (c, a)
@@ -227,15 +243,15 @@ let getCustomerAddresses () =
 
 ```fsharp
 // Select specific columns
-let getCityStates () =
-    selectTask openContext {
+let getCityStates (db: DB)  =
+    selectTask db.Create {
         for a in SalesLT.Address do
         select (a.City, a.StateProvince)
     }
 
 // Transform results with mapList
-let getCityLabels () =
-    selectTask openContext {
+let getCityLabels (db: DB)  =
+    selectTask db.Create {
         for a in SalesLT.Address do
         select (a.City, a.StateProvince) into (city, state)
         mapList $"City: {city}, State: {state}"
@@ -245,8 +261,8 @@ let getCityLabels () =
 ### Aggregates
 
 ```fsharp
-let getCategoriesWithHighPrices () =
-    selectTask openContext {
+let getCategoriesWithHighPrices (db: DB)  =
+    selectTask db.Create {
         for p in SalesLT.Product do
         where (p.ProductCategoryID <> None)
         groupBy p.ProductCategoryID
@@ -255,8 +271,8 @@ let getCategoriesWithHighPrices () =
     }
 
 // Count
-let getCustomerCount () =
-    selectTask openContext {
+let getCustomerCount (db: DB)  =
+    selectTask db.Create {
         for c in SalesLT.Customer do
         count
     }
@@ -288,7 +304,7 @@ open type SqlFn  // Optional: allows unqualified access, e.g. LEN vs SqlFn.LEN
 **Use in select and where clauses:**
 ```fsharp
 // String functions
-selectTask openContext {
+selectTask db.Create {
     for p in Person.Person do
     where (LEN(p.FirstName) > 3)
     select (p.FirstName, LEN(p.FirstName), UPPER(p.FirstName))
@@ -296,20 +312,20 @@ selectTask openContext {
 // Generates: SELECT ... WHERE LEN([p].[FirstName]) > 3
 
 // Null handling - ISNULL accepts Option<'T> and returns unwrapped 'T
-selectTask openContext {
+selectTask db.Create {
     for p in Person.Person do
     select (ISNULL(p.MiddleName, "N/A"))  // Option<string> -> string
 }
 
 // Date functions
-selectTask openContext {
+selectTask db.Create {
     for o in Sales.SalesOrderHeader do
     where (YEAR(o.OrderDate) = 2024)
     select (o.OrderDate, YEAR(o.OrderDate), MONTH(o.OrderDate))
 }
 
 // Compare two functions
-selectTask openContext {
+selectTask db.Create {
     for p in Person.Person do
     where (LEN(p.FirstName) < LEN(p.LastName))
     select (p.FirstName, p.LastName)
@@ -334,7 +350,7 @@ let SOUNDEX (s: string) : string = sqlFn
 let DIFFERENCE (s1: string, s2: string) : int = sqlFn
 
 // Use in queries
-selectTask openContext {
+selectTask db.Create {
     for p in Person.Person do
     where (SOUNDEX(p.LastName) = SOUNDEX("Smith"))
     select p.LastName
@@ -356,8 +372,8 @@ let top5Categories =
         take 5
     }
 
-let getTopCategoryNames () =
-    selectTask openContext {
+let getTopCategoryNames (db: DB)  =
+    selectTask db.Create {
         for c in SalesLT.ProductCategory do
         where (Some c.ProductCategoryID |=| subqueryMany top5Categories)
         select c.Name
@@ -370,8 +386,8 @@ let avgPrice =
         select (avgBy p.ListPrice)
     }
 
-let getAboveAverageProducts () =
-    selectTask openContext {
+let getAboveAverageProducts (db: DB)  =
+    selectTask db.Create {
         for p in SalesLT.Product do
         where (p.ListPrice > subqueryOne avgPrice)
         select p
@@ -382,7 +398,7 @@ let getAboveAverageProducts () =
 
 ```fsharp
 // Ordering
-selectTask openContext {
+selectTask db.Create {
     for p in SalesLT.Product do
     orderBy p.Name
     thenByDescending p.ListPrice
@@ -390,15 +406,15 @@ selectTask openContext {
 }
 
 // Conditional ordering with ^^
-let getAddresses (sortByCity: bool) =
-    selectTask openContext {
+let getAddresses (db: DB) (sortByCity: bool) =
+    selectTask db.Create {
         for a in Person.Address do
         orderBy (sortByCity ^^ a.City)
         select a
     }
 
 // Pagination
-selectTask openContext {
+selectTask db.Create {
     for p in SalesLT.Product do
     skip 10
     take 20
@@ -406,14 +422,14 @@ selectTask openContext {
 }
 
 // Distinct
-selectTask openContext {
+selectTask db.Create {
     for c in SalesLT.Customer do
     select (c.FirstName, c.LastName)
     distinct
 }
 
 // Get single/optional result
-selectTask openContext {
+selectTask db.Create {
     for p in SalesLT.Product do
     where (p.ProductID = 123)
     select p
@@ -427,7 +443,7 @@ The `select` clause only supports selecting columns/tables - **not** transformat
 
 **Correct:** Transform in `mapList`/`mapArray`/`mapSeq`:
 ```fsharp
-selectTask openContext {
+selectTask db.Create {
     for a in SalesLT.Address do
     select (a.City, a.StateProvince) into (city, state)
     mapList $"City: {city}, State: {state}"
@@ -437,7 +453,7 @@ selectTask openContext {
 **Incorrect:** Transforming in `select` throws at runtime:
 ```fsharp
 // DON'T DO THIS - will throw!
-selectTask openContext {
+selectTask db.Create {
     for a in SalesLT.Address do
     select ($"City: {a.City}")
 }
@@ -453,14 +469,14 @@ selectTask openContext {
 ```fsharp
 // Simple insert
 let! rowsInserted =
-    insertTask openContext {
+    insertTask db.Create {
         into dbo.Person
         entity { ID = Guid.NewGuid(); FirstName = "John"; LastName = "Doe" }
     }
 
 // Insert with identity column
 let! newId =
-    insertTask openContext {
+    insertTask db.Create {
         for e in dbo.ErrorLog do
         entity { ErrorLogID = 0; ErrorMessage = "Test"; (* ... *) }
         getId e.ErrorLogID  // Returns the generated ID
@@ -469,7 +485,7 @@ let! newId =
 // Multiple inserts
 match items |> AtLeastOne.tryCreate with
 | Some items ->
-    insertTask openContext {
+    insertTask db.Create {
         into dbo.Product
         entities items
     }
@@ -482,7 +498,7 @@ match items |> AtLeastOne.tryCreate with
 ```fsharp
 open SqlHydra.Query.NpgsqlExtensions  // or SqliteExtensions
 
-insertTask openContext {
+insertTask db.Create {
     for a in Person.Address do
     entity address
     onConflictDoUpdate a.AddressID (a.City, a.PostalCode, a.ModifiedDate)
@@ -493,7 +509,7 @@ insertTask openContext {
 
 ```fsharp
 // Update specific fields
-updateTask openContext {
+updateTask db.Create {
     for e in dbo.ErrorLog do
     set e.ErrorMessage "Updated message"
     set e.ErrorNumber 500
@@ -501,7 +517,7 @@ updateTask openContext {
 }
 
 // Update entire entity
-updateTask openContext {
+updateTask db.Create {
     for e in dbo.ErrorLog do
     entity errorLog
     excludeColumn e.ErrorLogID  // Don't update the ID
@@ -509,7 +525,7 @@ updateTask openContext {
 }
 
 // Update all rows (requires explicit opt-in)
-updateTask openContext {
+updateTask db.Create {
     for c in Sales.Customer do
     set c.AccountNumber "123"
     updateAll
@@ -519,13 +535,13 @@ updateTask openContext {
 ### Delete
 
 ```fsharp
-deleteTask openContext {
+deleteTask db.Create {
     for e in dbo.ErrorLog do
     where (e.ErrorLogID = 5)
 }
 
 // Delete all rows (requires explicit opt-in)
-deleteTask openContext {
+deleteTask db.Create {
     for c in Sales.Customer do
     deleteAll
 }
@@ -539,8 +555,8 @@ deleteTask openContext {
 ### Sharing a QueryContext
 
 ```fsharp
-let getUserWithOrders email = task {
-    use ctx = openContext()
+let getUserWithOrders (db: DB) email = task {
+    use ctx = db.CreateContext()
 
     let! user = selectTask ctx {
         for u in dbo.Users do
@@ -575,7 +591,7 @@ select {
 ### Custom SQL with HydraReader
 
 ```fsharp
-let getTop10Products (conn: SqlConnection) = task {
+let getTop10Products (db: DB) (conn: SqlConnection) = task {
     let sql = "SELECT TOP 10 * FROM Product"
     use cmd = new SqlCommand(sql, conn)
     use! reader = cmd.ExecuteReaderAsync()
@@ -594,7 +610,7 @@ let getTop10Products (conn: SqlConnection) = task {
 open SqlHydra.Query.SqlServerExtensions
 
 let! (created, updated) =
-    insertTask openContext {
+    insertTask db.Create {
         for p in dbo.Person do
         entity person
         output (p.CreateDate, p.UpdateDate)
