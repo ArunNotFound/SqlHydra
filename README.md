@@ -219,12 +219,22 @@ let getProductsWithCategory (db: QueryContextFactory)  =
         take 10
     }
 
-// Left join (joined table becomes Option)
+// Left join (joined table becomes Option).
+// You can use `|> Option.map` to select specifc left joined columns.
 let getCustomerAddresses (db: QueryContextFactory)  =
     selectTask db {
         for c in SalesLT.Customer do
         leftJoin a in SalesLT.Address on (c.AddressID = a.Value.AddressID)
-        select (c, a)
+        select (
+            c.Email, 
+            a |> Option.map _.State
+        ) into selected
+        mapList (
+            let email, state = selected
+            match state with
+            | Some s -> $"Customer {email} lives in {s}"
+            | None -> $"Customer {email} has no address"
+        )
     }
 ```
 
