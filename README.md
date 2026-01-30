@@ -230,12 +230,23 @@ let getCustomerAddresses (db: QueryContextFactory)  =
             a |> Option.map _.State
         ) into selected
         mapList (
-            let email, state = selected
-            match state with
-            | Some s -> $"Customer {email} lives in {s}"
-            | None -> $"Customer {email} has no address"
+            let email, stateMaybe = selected
+            let state = stateMaybe |> Option.defaultValue "N/A"
+            $"Customer: {email}, State: {state}"
         )
     }
+
+
+// Improved join syntax with `join'` and `leftJoin'` lets you use full predicates in `on'` clauses.
+// * Makes multi-column joins much cleaner (no need for tuple comparison).
+// * Allows full predicates (e.g., AND/OR) in join conditions.
+// * Optional cheeky usage of `;` if you want `on'` on the same line!
+selectTask db {
+    for o in Sales.SalesOrderHeader do
+    join' d in Sales.SalesOrderDetail; on' (o.ID = d.OrderID && o.Status = "Completed")
+    select o
+}
+
 ```
 
 > **Note:** In join `on` clauses, put the known (left) table on the left side of the `=`.
