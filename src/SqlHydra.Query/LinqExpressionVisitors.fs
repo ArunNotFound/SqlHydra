@@ -1035,6 +1035,45 @@ let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
         | MethodCall m when m.Method.Name = "Some" ->
             // Columns selected from leftJoined tables may be wrapped in `Some` to make them optional.
             visit m.Arguments.[0]
+        | MethodCall m when m.Method.Name = "op_PipeRight" && m.Arguments.Count = 2 ->
+            // Handle: r |> Option.map _.ColumnA
+            // The F# compiler generates: op_PipeRight(source, Lambda(...ToFSharpFunc(Lambda(Option.Map(...)))).Invoke(ToFSharpFunc(Lambda(mapping))))
+            // We extract the source from Arg0 and the mapping lambda from the Invoke argument.
+            let source = m.Arguments.[0]
+            let rec findOptionMapLambda (exp: Expression) =
+                match exp with
+                | :? MethodCallExpression as invoke when invoke.Method.Name = "Invoke" ->
+                    // The Invoke argument contains the mapping function wrapped in ToFSharpFunc(Lambda(...))
+                    match invoke.Arguments.[0] with
+                    | :? MethodCallExpression as toFF when toFF.Method.Name = "ToFSharpFunc" ->
+                        match toFF.Arguments.[0] with
+                        | :? LambdaExpression as mapLam -> Some mapLam
+                        | _ -> None
+                    | _ -> None
+                | _ -> None
+            // Verify this is actually wrapping OptionModule.Map by checking the lambda body chain
+            let rec containsOptionMap (exp: Expression) =
+                match exp with
+                | :? MethodCallExpression as mc ->
+                    mc.Method.Name = "Map" && mc.Method.DeclaringType <> null && mc.Method.DeclaringType.Name = "OptionModule"
+                    || mc.Arguments |> Seq.exists containsOptionMap
+                    || (mc.Object <> null && containsOptionMap mc.Object)
+                | :? LambdaExpression as lam -> containsOptionMap lam.Body
+                | _ -> false
+            if containsOptionMap m.Arguments.[1] then
+                match findOptionMapLambda m.Arguments.[1] with
+                | Some mapLam ->
+                    match mapLam.Body with
+                    | Member memberExp ->
+                        let alias = visitAlias source
+                        [ SelectedColumn (alias, memberExp.Member.Name, memberExp.Type, true, false) ]
+                    | _ -> notImplMsg $"Unsupported Option.map lambda body: {mapLam.Body.NodeType}"
+                | None -> notImplMsg $"Could not extract mapping lambda from Option.map expression"
+            else
+                // Not an Option.map pipe; fall through to generic SQL function handling
+                let qualifyCol alias (mem: MemberInfo) = $"{{%s{alias}}}.{{%s{mem.Name}}}"
+                let sqlFragment = visitSqlFn qualifyCol (m :> Expression)
+                [ SelectedExpression sqlFragment ]
         | AggregateColumn (aggType, (p, _)) ->
             let alias = visitAlias p.Expression
             let fqCol = $"{{%s{alias}}}.{{%s{p.Member.Name}}}"
