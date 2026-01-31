@@ -387,10 +387,16 @@ static member Read(reader: {reader.ReaderType}) =
 module [<AutoOpen>] HydraBuilders =
     open SqlHydra.Query
     /// Builds a select query with a QueryContext - returns a Task query result
-    let inline selectTask ct = selectTask<'Selected, 'Mapped, {reader.ReaderType}, _> HydraReader.Read ct
+    let inline selectTask ct =
+        let b = selectTask<'Selected, 'Mapped, {reader.ReaderType}, _> HydraReader.Read ct
+        b.GenericReadMethod <- Some (typeof<HydraReader>.GetMethod("Read"))
+        b
 
     /// Builds a select query with a QueryContext - returns an Async query result
-    let inline selectAsync ct = selectAsync<'Selected, 'Mapped, {reader.ReaderType}, _> HydraReader.Read ct
+    let inline selectAsync ct =
+        let b = selectAsync<'Selected, 'Mapped, {reader.ReaderType}, _> HydraReader.Read ct
+        b.GenericReadMethod <- Some (typeof<HydraReader>.GetMethod("Read"))
+        b
 
 open SqlHydra.Query
 

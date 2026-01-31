@@ -153,10 +153,10 @@ type SelectBuilder<'Selected, 'Mapped> () =
         let queryWithSelectedColumns =
             selections
             |> List.fold (fun (q: Query) -> function
-                | LinqExpressionVisitors.SelectedTable (tableAlias, tableType) -> 
+                | LinqExpressionVisitors.SelectedTable (tableAlias, tableType) ->
                     // Explicitly select all columns in generated table record type.
                     // This avoids table scans due to 'SELECT *', and avoids potential errors when a table has more columns than expected.
-                    //let props = 
+                    //let props =
                     //    FSharp.Reflection.FSharpType.GetRecordFields(tableType)
                     //    |> Array.map (fun p -> $"%s{tableAlias}.%s{p.Name}")
                     //q.Select(props)
@@ -166,13 +166,31 @@ type SelectBuilder<'Selected, 'Mapped> () =
                     // For example, left joining a table creates an option type, which should be unwrapped.
                     q.Select($"%s{tableAlias}.*")
 
-                | LinqExpressionVisitors.SelectedColumn (tableAlias, column, _, _, _) -> 
+                | LinqExpressionVisitors.SelectedColumn (tableAlias, column, _, _, _) ->
                     // Select a single column
                     q.Select($"%s{tableAlias}.%s{column}")
                 | LinqExpressionVisitors.SelectedExpression sqlFragment ->
                     q.SelectRaw(sqlFragment)
             ) state.Query
-                  
+
+        QuerySource<'Selected, Query>(queryWithSelectedColumns, state.TableMappings)
+
+    /// Sets the SELECT statement using an arbitrary F# expression.
+    /// Supports string interpolation, conditionals, and other F# expressions that reference DB columns.
+    [<CustomOperation("selectExpr", MaintainsVariableSpace = true)>]
+    member this.SelectExpr (state: QuerySource<'T, Query>, [<ProjectionParameter>] selectExpression: Expression<Func<'T, 'Selected>>) =
+        let exprInfo = LinqExpressionVisitors.visitSelectExpr<'T, 'Selected> selectExpression
+
+        let queryWithSelectedColumns =
+            exprInfo.Leaves
+            |> List.fold (fun (q: Query) leaf ->
+                match leaf with
+                | LinqExpressionVisitors.TableLeaf (tableAlias, _, _) -> q.Select($"%s{tableAlias}.*")
+                | LinqExpressionVisitors.ColumnLeaf (tableAlias, column, _, _, _, _) -> q.Select($"%s{tableAlias}.%s{column}")
+                | LinqExpressionVisitors.SqlExprLeaf (sqlFragment, _, alias, _) -> q.SelectRaw($"{sqlFragment} AS {alias}")
+            ) state.Query
+
+        LinqExpressionVisitors.SelectExprStore.set queryWithSelectedColumns exprInfo
         QuerySource<'Selected, Query>(queryWithSelectedColumns, state.TableMappings)
 
     /// Sets the ORDER BY for single column
@@ -527,9 +545,12 @@ type SelectQueryBuilder<'Selected, 'Mapped> () =
 type SelectTaskBuilder<'Selected, 'Mapped, 'Reader & #DbDataReader> (
     readEntityBuilder: 'Reader -> (unit -> 'Selected), ct: ContextType, cancellationToken: CancellationToken) =
     inherit SelectBuilder<'Selected, 'Mapped>()
-    
+
+    /// The generic HydraReader.Read method, set by generated code for selectExpr support.
+    member val GenericReadMethod: System.Reflection.MethodInfo option = None with get, set
+
     new(readEntityBuilder, ct) = SelectTaskBuilder(readEntityBuilder, ct, CancellationToken.None)
-    
+
     member this.RunSelected(query: Query, resultModifier) =
         task {
             let! ctx = ContextUtils.getContext ct
@@ -544,55 +565,138 @@ type SelectTaskBuilder<'Selected, 'Mapped, 'Reader & #DbDataReader> (
     member this.RunMapped(query: Query, resultModifier) =
         task {
             let! ctx = ContextUtils.getContext ct
-            try 
+            try
                 let selectQuery = SelectQuery<'Selected>(query)
                 let! results = ctx.ReadAsyncWithOptions (selectQuery, readEntityBuilder, cancellationToken)
                 return results |> Seq.map this.MapFn.Value.Invoke |> resultModifier
-            finally 
+            finally
+                ContextUtils.disposeIfNotShared ct ctx
+        }
+
+    member private this.RunSelectExpr(query: Query, exprInfo: LinqExpressionVisitors.SelectExprInfo, resultModifier) =
+        task {
+            let! ctx = ContextUtils.getContext ct
+            try
+                use cmd = ctx.BuildCommand(query)
+                use! reader = cmd.ExecuteReaderAsync(cancellationToken)
+
+                // Reflectively call HydraReader.Read<LeafTupleType>(reader)
+                let readMethod = this.GenericReadMethod.Value.MakeGenericMethod(exprInfo.LeafTupleType)
+                let readerFnObj = readMethod.Invoke(null, [| reader |])
+                let invokeMethod = readerFnObj.GetType().GetMethod("Invoke")
+                let readRow () = invokeMethod.Invoke(readerFnObj, [| () :> obj |])
+
+                let results = ResizeArray<'Selected>()
+                let! hasMore = reader.ReadAsync(cancellationToken)
+                let mutable hasMore = hasMore
+                while hasMore do
+                    let row = readRow()
+                    let fields =
+                        if FSharp.Reflection.FSharpType.IsTuple(exprInfo.LeafTupleType)
+                        then FSharp.Reflection.FSharpValue.GetTupleFields(row)
+                        else [| row |]
+                    let result = exprInfo.CompiledMapper.Invoke(fields) :?> 'Selected
+                    results.Add(result)
+                    let! hasMore' = reader.ReadAsync(cancellationToken)
+                    hasMore <- hasMore'
+
+                return results :> seq<'Selected> |> resultModifier
+            finally
+                ContextUtils.disposeIfNotShared ct ctx
+        }
+
+    member private this.RunSelectExprMapped(query: Query, exprInfo: LinqExpressionVisitors.SelectExprInfo, resultModifier) =
+        task {
+            let! ctx = ContextUtils.getContext ct
+            try
+                use cmd = ctx.BuildCommand(query)
+                use! reader = cmd.ExecuteReaderAsync(cancellationToken)
+
+                let readMethod = this.GenericReadMethod.Value.MakeGenericMethod(exprInfo.LeafTupleType)
+                let readerFnObj = readMethod.Invoke(null, [| reader |])
+                let invokeMethod = readerFnObj.GetType().GetMethod("Invoke")
+                let readRow () = invokeMethod.Invoke(readerFnObj, [| () :> obj |])
+
+                let results = ResizeArray<'Mapped>()
+                let! hasMore = reader.ReadAsync(cancellationToken)
+                let mutable hasMore = hasMore
+                while hasMore do
+                    let row = readRow()
+                    let fields =
+                        if FSharp.Reflection.FSharpType.IsTuple(exprInfo.LeafTupleType)
+                        then FSharp.Reflection.FSharpValue.GetTupleFields(row)
+                        else [| row |]
+                    let selected = exprInfo.CompiledMapper.Invoke(fields) :?> 'Selected
+                    results.Add(this.MapFn.Value.Invoke(selected))
+                    let! hasMore' = reader.ReadAsync(cancellationToken)
+                    hasMore <- hasMore'
+
+                return results :> seq<'Mapped> |> resultModifier
+            finally
                 ContextUtils.disposeIfNotShared ct ctx
         }
 
     /// Run: default
-    /// Called when no mapSeq, mapArray or mapList is present; 
+    /// Called when no mapSeq, mapArray or mapList is present;
     /// this input will always be 'Selected -- even if select is not present.
     member this.Run(state: QuerySource<'Selected, Query>) =
-        this.RunSelected(state.Query, id)
+        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, id)
+        | None -> this.RunSelected(state.Query, id)
     
     /// Run: toList
     member this.Run(state: QuerySource<'Selected list, Query>) =
-        this.RunSelected(state.Query, Seq.toList)
-    
+        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.toList)
+        | None -> this.RunSelected(state.Query, Seq.toList)
+
     /// Run: toArray
     member this.Run(state: QuerySource<'Selected array, Query>) =
-        this.RunSelected(state.Query, Seq.toArray)
-    
+        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.toArray)
+        | None -> this.RunSelected(state.Query, Seq.toArray)
+
     /// Run: mapList
     member this.Run(state: QuerySource<'Mapped list, Query>) =
-        this.RunMapped(state.Query, Seq.toList)
-  
+        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.toList)
+        | None -> this.RunMapped(state.Query, Seq.toList)
+
     // Run: mapArray
     member this.Run(state: QuerySource<'Mapped array, Query>) =
-        this.RunMapped(state.Query, Seq.toArray)
+        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.toArray)
+        | None -> this.RunMapped(state.Query, Seq.toArray)
 
     // Run: mapSeq
     member this.Run(state: QuerySource<'Mapped seq, Query>) =
-        this.RunMapped(state.Query, id)
-        
+        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, id)
+        | None -> this.RunMapped(state.Query, id)
+
     // Run: tryHead - 'Selected
     member this.Run(state: QuerySource<'Selected option, Query>) =
-        this.RunSelected(state.Query, Seq.tryHead)
+        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.tryHead)
+        | None -> this.RunSelected(state.Query, Seq.tryHead)
 
     // Run: tryHead - 'Mapped
     member this.Run(state: QuerySource<'Mapped option, Query>) =
-        this.RunMapped(state.Query, Seq.tryHead)
-    
+        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.tryHead)
+        | None -> this.RunMapped(state.Query, Seq.tryHead)
+
     // Run: head - 'Selected
     member this.Run(state: QuerySource<ResultModifier.Head<'Selected>, Query>) =
-        this.RunSelected(state.Query, Seq.head)
+        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.head)
+        | None -> this.RunSelected(state.Query, Seq.head)
 
     // Run: head - 'Mapped
     member this.Run(state: QuerySource<ResultModifier.Head<'Mapped>, Query>) =
-        this.RunMapped(state.Query, Seq.head)
+        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.head)
+        | None -> this.RunMapped(state.Query, Seq.head)
 
     // Run: count
     member this.Run(state: QuerySource<ResultModifier.Count<int>, Query>) =
@@ -607,72 +711,161 @@ type SelectTaskBuilder<'Selected, 'Mapped, 'Reader & #DbDataReader> (
 type SelectAsyncBuilder<'Selected, 'Mapped, 'Reader & #DbDataReader> (
     readEntityBuilder: 'Reader -> (unit -> 'Selected), ct: ContextType) =
     inherit SelectBuilder<'Selected, 'Mapped>()
-    
+
+    /// The generic HydraReader.Read method, set by generated code for selectExpr support.
+    member val GenericReadMethod: System.Reflection.MethodInfo option = None with get, set
+
     member this.RunSelected(query: Query, resultModifier) =
         async {
             let! ctx = ContextUtils.getContext ct |> Async.AwaitTask
-            try 
+            try
                 let selectQuery = SelectQuery<'Selected>(query)
                 let! cancel = Async.CancellationToken
                 let! results = ctx.ReadAsyncWithOptions (selectQuery, readEntityBuilder, cancel) |> Async.AwaitTask
                 return results |> resultModifier
-            finally 
+            finally
                 ContextUtils.disposeIfNotShared ct ctx
         }
 
     member this.RunMapped(query: Query, resultModifier) =
         async {
             let! ctx = ContextUtils.getContext ct |> Async.AwaitTask
-            try 
+            try
                 let selectQuery = SelectQuery<'Selected>(query)
                 let! cancel = Async.CancellationToken
                 let! results = ctx.ReadAsyncWithOptions (selectQuery, readEntityBuilder, cancel) |> Async.AwaitTask
                 return results |> Seq.map this.MapFn.Value.Invoke |> resultModifier
-            finally 
+            finally
+                ContextUtils.disposeIfNotShared ct ctx
+        }
+
+    member private this.RunSelectExpr(query: Query, exprInfo: LinqExpressionVisitors.SelectExprInfo, resultModifier) =
+        async {
+            let! ctx = ContextUtils.getContext ct |> Async.AwaitTask
+            try
+                use cmd = ctx.BuildCommand(query)
+                let! cancel = Async.CancellationToken
+                let! reader = cmd.ExecuteReaderAsync(cancel) |> Async.AwaitTask
+
+                let readMethod = this.GenericReadMethod.Value.MakeGenericMethod(exprInfo.LeafTupleType)
+                let readerFnObj = readMethod.Invoke(null, [| reader |])
+                let invokeMethod = readerFnObj.GetType().GetMethod("Invoke")
+                let readRow () = invokeMethod.Invoke(readerFnObj, [| () :> obj |])
+
+                let results = ResizeArray<'Selected>()
+                let! hasMore = reader.ReadAsync(cancel) |> Async.AwaitTask
+                let mutable hasMore = hasMore
+                while hasMore do
+                    let row = readRow()
+                    let fields =
+                        if FSharp.Reflection.FSharpType.IsTuple(exprInfo.LeafTupleType)
+                        then FSharp.Reflection.FSharpValue.GetTupleFields(row)
+                        else [| row |]
+                    let result = exprInfo.CompiledMapper.Invoke(fields) :?> 'Selected
+                    results.Add(result)
+                    let! hasMore' = reader.ReadAsync(cancel) |> Async.AwaitTask
+                    hasMore <- hasMore'
+
+                reader.Dispose()
+                return results :> seq<'Selected> |> resultModifier
+            finally
+                ContextUtils.disposeIfNotShared ct ctx
+        }
+
+    member private this.RunSelectExprMapped(query: Query, exprInfo: LinqExpressionVisitors.SelectExprInfo, resultModifier) =
+        async {
+            let! ctx = ContextUtils.getContext ct |> Async.AwaitTask
+            try
+                use cmd = ctx.BuildCommand(query)
+                let! cancel = Async.CancellationToken
+                let! reader = cmd.ExecuteReaderAsync(cancel) |> Async.AwaitTask
+
+                let readMethod = this.GenericReadMethod.Value.MakeGenericMethod(exprInfo.LeafTupleType)
+                let readerFnObj = readMethod.Invoke(null, [| reader |])
+                let invokeMethod = readerFnObj.GetType().GetMethod("Invoke")
+                let readRow () = invokeMethod.Invoke(readerFnObj, [| () :> obj |])
+
+                let results = ResizeArray<'Mapped>()
+                let! hasMore = reader.ReadAsync(cancel) |> Async.AwaitTask
+                let mutable hasMore = hasMore
+                while hasMore do
+                    let row = readRow()
+                    let fields =
+                        if FSharp.Reflection.FSharpType.IsTuple(exprInfo.LeafTupleType)
+                        then FSharp.Reflection.FSharpValue.GetTupleFields(row)
+                        else [| row |]
+                    let selected = exprInfo.CompiledMapper.Invoke(fields) :?> 'Selected
+                    results.Add(this.MapFn.Value.Invoke(selected))
+                    let! hasMore' = reader.ReadAsync(cancel) |> Async.AwaitTask
+                    hasMore <- hasMore'
+
+                reader.Dispose()
+                return results :> seq<'Mapped> |> resultModifier
+            finally
                 ContextUtils.disposeIfNotShared ct ctx
         }
 
     /// Run: default
-    /// Called when no mapSeq, mapArray or mapList is present; 
+    /// Called when no mapSeq, mapArray or mapList is present;
     /// this input will always be 'Selected -- even if select is not present.
     member this.Run(state: QuerySource<'Selected, Query>) =
-        this.RunSelected(state.Query, id)
-    
+        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, id)
+        | None -> this.RunSelected(state.Query, id)
+
     /// Run: toList
     member this.Run(state: QuerySource<'Selected list, Query>) =
-        this.RunSelected(state.Query, Seq.toList)
-    
+        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.toList)
+        | None -> this.RunSelected(state.Query, Seq.toList)
+
     /// Run: toArray
     member this.Run(state: QuerySource<'Selected array, Query>) =
-        this.RunSelected(state.Query, Seq.toArray)
+        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.toArray)
+        | None -> this.RunSelected(state.Query, Seq.toArray)
 
     /// Run: mapList
     member this.Run(state: QuerySource<'Mapped list, Query>) =
-        this.RunMapped(state.Query, Seq.toList)
-    
+        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.toList)
+        | None -> this.RunMapped(state.Query, Seq.toList)
+
     // Run: mapArray
     member this.Run(state: QuerySource<'Mapped array, Query>) =
-        this.RunMapped(state.Query, Seq.toArray)
+        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.toArray)
+        | None -> this.RunMapped(state.Query, Seq.toArray)
 
     // Run: mapSeq
     member this.Run(state: QuerySource<'Mapped seq, Query>) =
-        this.RunMapped(state.Query, id)
-    
+        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, id)
+        | None -> this.RunMapped(state.Query, id)
+
     // Run: tryHead - 'Selected
     member this.Run(state: QuerySource<'Selected option, Query>) =
-        this.RunSelected(state.Query, Seq.tryHead)
+        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.tryHead)
+        | None -> this.RunSelected(state.Query, Seq.tryHead)
 
     // Run: tryHead - 'Mapped
     member this.Run(state: QuerySource<'Mapped option, Query>) =
-        this.RunMapped(state.Query, Seq.tryHead)
+        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.tryHead)
+        | None -> this.RunMapped(state.Query, Seq.tryHead)
 
     // Run: head - 'Selected
     member this.Run(state: QuerySource<ResultModifier.Head<'Selected>, Query>) =
-        this.RunSelected(state.Query, Seq.head)
+        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.head)
+        | None -> this.RunSelected(state.Query, Seq.head)
 
     // Run: head - 'Mapped
     member this.Run(state: QuerySource<ResultModifier.Head<'Mapped>, Query>) =
-        this.RunMapped(state.Query, Seq.head)
+        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.head)
+        | None -> this.RunMapped(state.Query, Seq.head)
 
     // Run: count
     member this.Run(state: QuerySource<ResultModifier.Count<int>, Query>) =

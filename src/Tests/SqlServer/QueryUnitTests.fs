@@ -923,3 +923,45 @@ let ``Multiple Left Joins with on' - The Motivating Use Case``() =
 
     sql.Contains("LEFT JOIN [Sales].[SalesOrderDetail] AS [d1] ON ([o].[SalesOrderID] = [d1].[SalesOrderID] AND [d1].[OrderQty] > @p0)") =! true
     sql.Contains("LEFT JOIN [Sales].[SalesOrderDetail] AS [d2] ON ([o].[SalesOrderID] = [d2].[SalesOrderID] AND [d2].[OrderQty] > @p1)") =! true
+
+// ========== selectExpr Tests ==========
+
+[<Test>]
+let ``selectExpr Single Column``() =
+    let sql =
+        select {
+            for p in Person.Person do
+            selectExpr p.FirstName
+        }
+        |> toSql
+
+    sql.Contains("SELECT [p].[FirstName] FROM") =! true
+
+[<Test>]
+let ``selectExpr Two Columns``() =
+    let sql =
+        select {
+            for p in Person.Person do
+            selectExpr (p.FirstName, p.LastName)
+        }
+        |> toSql
+
+    sql.Contains("SELECT [p].[FirstName], [p].[LastName] FROM") =! true
+
+[<Test>]
+let ``selectExpr Deduplicates Columns``() =
+    let sql =
+        select {
+            for p in Person.Person do
+            selectExpr (p.FirstName, p.FirstName)
+        }
+        |> toSql
+
+    // Should only select FirstName once
+    let idx1 = sql.IndexOf("[p].[FirstName]")
+    let idx2 = sql.IndexOf("[p].[FirstName]", idx1 + 1)
+    idx1 > -1 =! true
+    // The second occurrence should only appear after "FROM" (i.e., not in the SELECT clause again)
+    // Actually with deduplication, it should only appear once in the SELECT part
+    let fromIdx = sql.IndexOf("FROM")
+    (idx2 = -1 || idx2 > fromIdx) =! true
