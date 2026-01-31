@@ -123,3 +123,44 @@ let ``selectTask - tryHead - Mapped``() = task {
         
     result |> Option.isSome =! true
 }
+
+
+[<Test>]
+let ``selectExpr - complex expression``() = task {
+    let! results = 
+        selectTask db {
+            for p in Person.Person do
+            take 10
+            selectExpr (
+                if p.FirstName = "John" 
+                then $"{p.FirstName} {p.LastName} (VIP)"
+                else $"{p.FirstName} <> John"
+            )
+        }
+        
+    results |> Seq.iter (printf "%s\n")
+    gt0 results
+}
+
+[<Test>]
+let ``selectExpr - leftJoin`` () = task {
+    let! results = 
+        selectTask db  {
+            for o in Sales.SalesOrderHeader do
+            leftJoin sr in Sales.SalesOrderHeaderSalesReason on (o.SalesOrderID = sr.Value.SalesOrderID)
+            leftJoin r in Sales.SalesReason on (sr.Value.SalesReasonID = r.Value.SalesReasonID)
+            where (isNotNullValue r.Value.Name)
+            select (o, r |> Option.map _.ReasonType, r |> Option.map _.Name) into selected
+            mapArray (
+                let order, reason, name = selected
+                $"Order: {order.SalesOrderID}, Reason: {reason}, Name: {name}\n"
+            )
+            //selectExpr (o, r |> Option.map _.ReasonType, r |> Option.map _.Name)
+            //selectExpr (o, Some r.Value.ReasonType, r.Value.Name)
+            take 10
+            //toArray
+        }
+
+    results |> Array.iter (printf "%s")
+    gt0 results
+}

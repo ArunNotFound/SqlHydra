@@ -1166,9 +1166,20 @@ let visitSelectExpr<'T, 'Selected> (selectExpression: Expression<Func<'T, 'Selec
     let isGeneratedRecordType (t: Type) =
         t <> null && t.DeclaringType <> null && FSharp.Reflection.FSharpType.IsRecord(t, System.Reflection.BindingFlags.Public ||| System.Reflection.BindingFlags.NonPublic)
 
+    /// Checks if a type is Option<RecordType> where RecordType is a generated record type.
+    let isOptionOfGeneratedRecordType (t: Type) =
+        t <> null && isOptionType t && isGeneratedRecordType (t.GetGenericArguments().[0])
+
+    /// Checks if a type is a generated record type or an Option wrapping one.
+    let isTableType (t: Type) =
+        isGeneratedRecordType t || isOptionOfGeneratedRecordType t
+
     /// Checks if a method belongs to the SqlHydra.Query assembly (i.e., is a SQL function).
     let isSqlHydraMethod (m: MethodInfo) =
         m.Module.Name = "SqlHydra.Query.dll"
+
+    /// Map of parameter substitutions for inlined Lambda/Invoke patterns.
+    let paramSubs = System.Collections.Generic.Dictionary<ParameterExpression, Expression>()
 
     let rec rewrite (exp: Expression) : Expression =
         match exp with
@@ -1177,11 +1188,23 @@ let visitSelectExpr<'T, 'Selected> (selectExpression: Expression<Func<'T, 'Selec
             if obj.ReferenceEquals(newBody, x.Body) then exp
             else Expression.Lambda(x.Type, newBody, x.Parameters) :> Expression
 
-        | MethodCall m when m.Method.Name = "Invoke" ->
-            // Handle tuples - rewrite the object expression
-            let newObj = rewrite m.Object
-            if obj.ReferenceEquals(newObj, m.Object) then exp
-            else Expression.Call(newObj, m.Method, m.Arguments) :> Expression
+        | MethodCall m when m.Method.Name = "Invoke" && m.Object <> null ->
+            match m.Object with
+            | :? LambdaExpression as innerLambda ->
+                // Inline: substitute lambda params with RAW arguments (not yet rewritten),
+                // then rewrite the body so column accesses through substituted params are recognized.
+                for i in 0 .. innerLambda.Parameters.Count - 1 do
+                    paramSubs.[innerLambda.Parameters.[i]] <- m.Arguments.[i]
+                let result = rewrite innerLambda.Body
+                for i in 0 .. innerLambda.Parameters.Count - 1 do
+                    paramSubs.Remove(innerLambda.Parameters.[i]) |> ignore
+                result
+            | _ ->
+                let newObj = rewrite m.Object
+                let newArgs = m.Arguments |> Seq.map rewrite |> Seq.toArray
+                let changed = not (obj.ReferenceEquals(newObj, m.Object)) || Seq.zip m.Arguments newArgs |> Seq.exists (fun (a, b) -> not (obj.ReferenceEquals(a, b)))
+                if changed then Expression.Call(newObj, m.Method, newArgs) :> Expression
+                else exp
 
         | MethodCall m when m.Method.Name = "Some" ->
             // Option.Some wrapping
@@ -1259,12 +1282,21 @@ let visitSelectExpr<'T, 'Selected> (selectExpression: Expression<Func<'T, 'Selec
             else exp
 
         | New n ->
-            // Handle tuples
+            // Handle tuples and other constructors
             let newArgs = n.Arguments |> Seq.map rewrite |> Seq.toArray
             Expression.New(n.Constructor, newArgs) :> Expression
 
-        | Parameter p when isGeneratedRecordType p.Type ->
-            // Whole table reference
+        | :? NewArrayExpression as na when na.NodeType = ExpressionType.NewArrayInit ->
+            // Handle array initializers (e.g., format args in string interpolation)
+            let newExprs = na.Expressions |> Seq.map rewrite |> Seq.toArray
+            Expression.NewArrayInit(na.Type.GetElementType(), newExprs) :> Expression
+
+        | Parameter p when paramSubs.ContainsKey(p) ->
+            // This parameter was substituted via Lambda/Invoke inlining
+            paramSubs.[p]
+
+        | Parameter p when isTableType p.Type ->
+            // Whole table reference (including Option<RecordType> from leftJoin)
             let key = $"__table:{p.Name}"
             getOrAddLeaf key
                 (fun idx -> TableLeaf (p.Name, p.Type, idx))
@@ -1275,27 +1307,58 @@ let visitSelectExpr<'T, 'Selected> (selectExpression: Expression<Func<'T, 'Selec
             exp
 
         | Member m when m.Member.DeclaringType <> null && m.Member.DeclaringType |> isOptionOrNullableType ->
-            // Unwrap .Value on Option/Nullable
-            rewrite m.Expression
+            // Option/Nullable member access (.Value, .IsSome, .IsNone, .HasValue, etc.)
+            // Rewrite inner expression but preserve the member access
+            let newExpr = rewrite m.Expression
+            if obj.ReferenceEquals(newExpr, m.Expression) then exp
+            else Expression.MakeMemberAccess(newExpr, m.Member) :> Expression
 
         | Member m when m.Expression <> null ->
-            // Check if this is a column access on a table parameter
+            // Check if this is a column access on a table parameter (following substitutions)
             let rec isTableParam (e: Expression) =
                 match e with
-                | Parameter p -> isGeneratedRecordType p.Type
+                | Parameter p when paramSubs.ContainsKey(p) -> isTableParam paramSubs.[p]
+                | Parameter p -> isTableType p.Type
                 | Member inner when inner.Member.DeclaringType <> null && inner.Member.DeclaringType |> isOptionOrNullableType -> isTableParam inner.Expression
                 | _ -> false
 
+            // Resolve alias following substitutions
+            let rec resolveAlias (e: Expression) =
+                match e with
+                | Parameter p when paramSubs.ContainsKey(p) -> resolveAlias paramSubs.[p]
+                | Member inner when inner.Member.DeclaringType <> null && inner.Member.DeclaringType |> isOptionOrNullableType -> resolveAlias inner.Expression
+                | Parameter p -> p.Name
+                | _ -> visitAlias e
+
             if isTableParam m.Expression then
-                let alias = visitAlias m.Expression
-                let isOptional =
-                    m.Type.IsGenericType && m.Type.GetGenericTypeDefinition() = typedefof<Option<_>>
-                let isNullable =
-                    m.Type.IsGenericType && m.Type.GetGenericTypeDefinition() = typedefof<Nullable<_>>
-                let key = $"{alias}.{m.Member.Name}"
-                getOrAddLeaf key
-                    (fun idx -> ColumnLeaf (alias, m.Member.Name, m.Type, isOptional, isNullable, idx))
-                    m.Type
+                let alias = resolveAlias m.Expression
+                let tableKey = $"__table:{alias}"
+                // If a TableLeaf already exists for this alias, access the property on the table record
+                // instead of adding a separate column to SELECT
+                match leafKeys.TryGetValue(tableKey) with
+                | true, tableIdx ->
+                    let tableAccess =
+                        Expression.Convert(
+                            Expression.ArrayIndex(paramArray, Expression.Constant(tableIdx)),
+                            leaves.[tableIdx] |> function TableLeaf (_, t, _) -> t | _ -> failwith "expected TableLeaf") :> Expression
+                    // Unwrap Option.Value if the table is Option<RecordType>
+                    let recordAccess =
+                        let tableType = (leaves.[tableIdx] |> function TableLeaf (_, t, _) -> t | _ -> failwith "expected TableLeaf")
+                        if isOptionType tableType then
+                            let valueProp = tableType.GetProperty("Value")
+                            Expression.MakeMemberAccess(tableAccess, valueProp) :> Expression
+                        else
+                            tableAccess
+                    Expression.MakeMemberAccess(recordAccess, m.Member) :> Expression
+                | false, _ ->
+                    let isOptional =
+                        m.Type.IsGenericType && m.Type.GetGenericTypeDefinition() = typedefof<Option<_>>
+                    let isNullable =
+                        m.Type.IsGenericType && m.Type.GetGenericTypeDefinition() = typedefof<Nullable<_>>
+                    let key = $"{alias}.{m.Member.Name}"
+                    getOrAddLeaf key
+                        (fun idx -> ColumnLeaf (alias, m.Member.Name, m.Type, isOptional, isNullable, idx))
+                        m.Type
             else
                 // Non-table member access (e.g., accessing a captured variable) - rewrite inner
                 let newExpr = rewrite m.Expression
@@ -1334,9 +1397,16 @@ let visitSelectExpr<'T, 'Selected> (selectExpression: Expression<Func<'T, 'Selec
             (fun idx -> SqlExprLeaf (sqlFragment, originalExp.Type, exprAlias, idx))
             originalExp.Type
 
-    // Rewrite the expression body
-    let lambda = selectExpression :> LambdaExpression
-    let rewrittenBody = rewrite lambda.Body
+    // Unwrap the Lambda -> Invoke -> Lambda nesting that F# CEs generate,
+    // to get the actual body expression with direct parameter references (o, sr, r, etc.)
+    let rec unwrapBody (exp: Expression) =
+        match exp with
+        | Lambda x -> unwrapBody x.Body
+        | MethodCall m when m.Method.Name = "Invoke" -> unwrapBody m.Object
+        | _ -> exp
+
+    let actualBody = unwrapBody (selectExpression :> Expression)
+    let rewrittenBody = rewrite actualBody
 
     // Build the leaf tuple type and compiled mapper
     let leafTypes =
@@ -1360,7 +1430,9 @@ let visitSelectExpr<'T, 'Selected> (selectExpression: Expression<Func<'T, 'Selec
         else
             rewrittenBody
     let mapperLambda = Expression.Lambda<Func<obj[], obj>>(convertedBody, paramArray)
-    let compiledMapper = mapperLambda.CompileFast<Func<obj[], obj>>()
+    let compiledMapper =
+        try mapperLambda.CompileFast<Func<obj[], obj>>()
+        with _ -> mapperLambda.Compile()
 
     {
         Leaves = leaves |> Seq.toList

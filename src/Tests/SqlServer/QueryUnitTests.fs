@@ -965,3 +965,36 @@ let ``selectExpr Deduplicates Columns``() =
     // Actually with deduplication, it should only appear once in the SELECT part
     let fromIdx = sql.IndexOf("FROM")
     (idx2 = -1 || idx2 > fromIdx) =! true
+
+[<Test>]
+let ``selectExpr Complex`` () = 
+    let sql =
+        select {
+            for p in Person.Person do
+            selectExpr (
+                if p.FirstName = "John" 
+                then  $"Is John"
+                else "Is not john"
+            )
+        }
+        |> toSql
+
+    sql.Contains("SELECT [p].[FirstName] FROM") =! true
+
+
+[<Test>]
+let ``selectExpr - leftJoin with match`` () =
+    let sql = 
+        select {
+            for o in Sales.SalesOrderHeader do
+            leftJoin sr in Sales.SalesOrderHeaderSalesReason on (o.SalesOrderID = sr.Value.SalesOrderID)
+            leftJoin r in Sales.SalesReason on (sr.Value.SalesReasonID = r.Value.SalesReasonID)
+            selectExpr (
+                match r with
+                | Some reason -> $"Order: {o.SalesOrderID}, Reason: {reason.ReasonType}\n"
+                | None -> "No Reason Given"
+            )
+        }
+        |> toSql
+
+    sql.Contains("SELECT [r].*, [o].[SalesOrderID] FROM") =! true  
