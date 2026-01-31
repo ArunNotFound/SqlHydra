@@ -1249,8 +1249,11 @@ let visitSelectExpr<'T, 'Selected> (selectExpression: Expression<Func<'T, 'Selec
                     | _ -> notImplMsg $"Unsupported Option.map lambda body in selectExpr: {mapLam.Body.NodeType}"
                 | None -> notImplMsg $"Could not extract mapping lambda from Option.map in selectExpr"
             else
-                // Not an Option.map pipe; treat as SQL function
-                rewriteSqlFunction m exp
+                // Not an Option.map pipe; treat as a regular method call (rewrite arguments)
+                let newArgs = m.Arguments |> Seq.map rewrite |> Seq.toArray
+                let argsChanged = Seq.zip m.Arguments newArgs |> Seq.exists (fun (a, b) -> not (obj.ReferenceEquals(a, b)))
+                if argsChanged then Expression.Call(m.Method, newArgs) :> Expression
+                else exp
 
         | AggregateColumn (aggType, (p, _)) ->
             let alias = visitAlias p.Expression

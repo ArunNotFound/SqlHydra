@@ -155,12 +155,51 @@ let ``selectExpr - leftJoin`` () = task {
                 let order, reason, name = selected
                 $"Order: {order.SalesOrderID}, Reason: {reason}, Name: {name}\n"
             )
-            //selectExpr (o, r |> Option.map _.ReasonType, r |> Option.map _.Name)
-            //selectExpr (o, Some r.Value.ReasonType, r.Value.Name)
             take 10
-            //toArray
         }
 
     results |> Array.iter (printf "%s")
+    gt0 results
+}
+
+[<Test>]
+let ``selectExpr - leftJoin 2`` () = task {
+    let! results = 
+        selectTask db  {
+            for o in Sales.SalesOrderHeader do
+            leftJoin sr in Sales.SalesOrderHeaderSalesReason on (o.SalesOrderID = sr.Value.SalesOrderID)
+            leftJoin r in Sales.SalesReason on (sr.Value.SalesReasonID = r.Value.SalesReasonID)
+            where (isNotNullValue r.Value.Name)
+            selectExpr (
+                match r with
+                | Some reason -> $"Order: {o.SalesOrderID}, Reason: {reason.ReasonType}\n"
+                | None -> "No Reason Given"                
+            )
+            take 10
+        }
+
+    results |> Seq.iter (printf "%s")
+    gt0 results
+}
+
+
+[<Test>]
+let ``selectExpr - leftJoin 3`` () = task {
+    let! results = 
+        selectTask db  {
+            for o in Sales.SalesOrderHeader do
+            leftJoin sr in Sales.SalesOrderHeaderSalesReason on (o.SalesOrderID = sr.Value.SalesOrderID)
+            leftJoin r in Sales.SalesReason on (sr.Value.SalesReasonID = r.Value.SalesReasonID)
+            where (isNotNullValue r.Value.Name)
+            selectExpr (
+                match r with
+                | Some reason -> $"Order: {o.SalesOrderID}, Reason: {reason.ReasonType}\n"
+                | None -> "No Reason Given"
+                |> fun text -> text.ToUpper()
+            )
+            take 10
+        }
+
+    results |> Seq.iter (printf "%s")
     gt0 results
 }

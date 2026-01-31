@@ -971,6 +971,7 @@ let ``selectExpr Complex`` () =
     let sql =
         select {
             for p in Person.Person do
+            take 10
             selectExpr (
                 if p.FirstName = "John" 
                 then  $"Is John"
