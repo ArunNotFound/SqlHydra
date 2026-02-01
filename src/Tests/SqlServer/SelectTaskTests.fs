@@ -163,6 +163,27 @@ let ``selectExpr - leftJoin`` () = task {
 }
 
 [<Test>]
+let ``selectExpr - leftJoin column-only`` () = task {
+    let! results =
+        selectTask db {
+            for o in Sales.SalesOrderHeader do
+            leftJoin sr in Sales.SalesOrderHeaderSalesReason on (o.SalesOrderID = sr.Value.SalesOrderID)
+            leftJoin r in Sales.SalesReason on (sr.Value.SalesReasonID = r.Value.SalesReasonID)
+            where (isNotNullValue r.Value.Name)
+            selectExpr (
+                o.AccountNumber,
+                r |> Option.map _.ReasonType,
+                r |> Option.map _.Name
+            )
+            take 10
+            toArray
+        }
+
+    results |> Array.iter (fun (acct, reason, name) -> printf $"Acct: {acct}, Reason: {reason}, Name: {name}\n")
+    gt0 results
+}
+
+[<Test>]
 let ``selectExpr - leftJoin 2`` () = task {
     let! results = 
         selectTask db  {

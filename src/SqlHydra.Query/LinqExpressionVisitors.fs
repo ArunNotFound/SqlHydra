@@ -1133,6 +1133,182 @@ let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
 
     visit (propertySelector :> Expression)
 
+/// Tracks how each alias is used in the projection expression.
+type AliasUsage = {
+    mutable RequiresFullRecord: bool
+    UsedColumns: System.Collections.Generic.HashSet<string>
+}
+
+/// Analyzes a projection expression to determine, per alias, whether the full record is needed
+/// or only specific columns are accessed.
+let analyzeProjectionShape
+    (body: Expression)
+    (outerParamNames: System.Collections.Generic.HashSet<string>)
+    (outerParamTypes: System.Collections.Generic.Dictionary<string, Type>)
+    (typeToAlias: System.Collections.Generic.Dictionary<Type, string>)
+    =
+    let usageMap = System.Collections.Generic.Dictionary<string, AliasUsage>()
+
+    let getOrCreate (alias: string) =
+        match usageMap.TryGetValue(alias) with
+        | true, u -> u
+        | false, _ ->
+            let u = { RequiresFullRecord = false; UsedColumns = System.Collections.Generic.HashSet<string>() }
+            usageMap.[alias] <- u
+            u
+
+    let isGeneratedRecordType (t: Type) =
+        t <> null && t.DeclaringType <> null && FSharp.Reflection.FSharpType.IsRecord(t, System.Reflection.BindingFlags.Public ||| System.Reflection.BindingFlags.NonPublic)
+
+    let isOptionOfGeneratedRecordType (t: Type) =
+        t <> null && isOptionType t && isGeneratedRecordType (t.GetGenericArguments().[0])
+
+    let isTableType (t: Type) =
+        isGeneratedRecordType t || isOptionOfGeneratedRecordType t
+
+    /// Resolve alias from a parameter expression using the same logic as the rewriter.
+    let resolveAlias (p: ParameterExpression) =
+        if outerParamNames.Contains(p.Name) then p.Name
+        else
+            match typeToAlias.TryGetValue(p.Type) with
+            | true, alias -> alias
+            | false, _ -> p.Name
+
+    /// Try to get the alias from an expression that bottoms out at a parameter.
+    let rec tryGetAlias (e: Expression) =
+        match e with
+        | Parameter p when isTableType p.Type -> Some (resolveAlias p)
+        | Member m when m.Member.DeclaringType <> null && isOptionOrNullableType m.Member.DeclaringType ->
+            tryGetAlias m.Expression
+        | _ -> None
+
+    /// Check if a MethodCall is an Option.map/Option.bind with a simple field accessor lambda.
+    /// Returns Some(sourceExpr, fieldName) if so.
+    let (|OptionMapField|_|) (exp: Expression) =
+        match exp with
+        | MethodCall m when m.Method.Name = "op_PipeRight" && m.Arguments.Count = 2 ->
+            let source = m.Arguments.[0]
+            let rec containsOptionMap (e: Expression) =
+                match e with
+                | :? MethodCallExpression as mc ->
+                    (mc.Method.Name = "Map" && mc.Method.DeclaringType <> null && mc.Method.DeclaringType.Name = "OptionModule")
+                    || mc.Arguments |> Seq.exists containsOptionMap
+                    || (mc.Object <> null && containsOptionMap mc.Object)
+                | :? LambdaExpression as lam -> containsOptionMap lam.Body
+                | _ -> false
+            if containsOptionMap m.Arguments.[1] then
+                let rec findMapLambda (e: Expression) =
+                    match e with
+                    | :? MethodCallExpression as invoke when invoke.Method.Name = "Invoke" ->
+                        match invoke.Arguments.[0] with
+                        | :? MethodCallExpression as toFF when toFF.Method.Name = "ToFSharpFunc" ->
+                            match toFF.Arguments.[0] with
+                            | :? LambdaExpression as mapLam -> Some mapLam
+                            | _ -> None
+                        | _ -> None
+                    | _ -> None
+                match findMapLambda m.Arguments.[1] with
+                | Some mapLam ->
+                    match mapLam.Body with
+                    | Member memberExp -> Some (source, memberExp.Member.Name)
+                    | _ -> None
+                | None -> None
+            else None
+        | _ -> None
+
+    let rec analyze (exp: Expression) =
+        match exp with
+        // Option.map _.Field — only needs the specific column
+        | OptionMapField (source, fieldName) ->
+            match tryGetAlias source with
+            | Some alias -> (getOrCreate alias).UsedColumns.Add(fieldName) |> ignore
+            | None -> analyzeChildren exp
+
+        // Match/switch scrutinee — marks full record required
+        | :? SwitchExpression as sw ->
+            match tryGetAlias sw.SwitchValue with
+            | Some alias -> (getOrCreate alias).RequiresFullRecord <- true
+            | None -> ()
+            analyzeChildren exp
+
+        // Conditional — check if test is on an alias (match on option compiles to conditional)
+        | :? ConditionalExpression as c ->
+            // For `match optAlias with Some x -> ... | None -> ...`, the test is typically
+            // a check like `optAlias.get_Tag() == 1` or similar. We detect if the test references a table alias.
+            analyzeConditionalTest c.Test
+            analyze c.IfTrue
+            analyze c.IfFalse
+
+        // Direct member access on a table parameter: alias.Field
+        | Member m when m.Expression <> null ->
+            match tryGetAlias m.Expression with
+            | Some alias when not (isOptionOrNullableType m.Member.DeclaringType) ->
+                (getOrCreate alias).UsedColumns.Add(m.Member.Name) |> ignore
+            | _ -> analyzeChildren exp
+
+        // A standalone table-typed parameter (not accessed as .Field or via Option.map)
+        | Parameter p when isTableType p.Type ->
+            let alias = resolveAlias p
+            (getOrCreate alias).RequiresFullRecord <- true
+
+        | _ -> analyzeChildren exp
+
+    and analyzeChildren (exp: Expression) =
+        match exp with
+        | Lambda x -> analyze x.Body
+        | MethodCall m ->
+            if m.Object <> null then analyze m.Object
+            for arg in m.Arguments do analyze arg
+        | :? InvocationExpression as inv ->
+            analyze inv.Expression
+            for arg in inv.Arguments do analyze arg
+        | New n ->
+            for arg in n.Arguments do analyze arg
+        | Unary u -> analyze u.Operand
+        | Binary b -> analyze b.Left; analyze b.Right
+        | :? ConditionalExpression as c ->
+            analyze c.Test; analyze c.IfTrue; analyze c.IfFalse
+        | :? BlockExpression as blk ->
+            for e in blk.Expressions do analyze e
+        | :? SwitchExpression as sw ->
+            analyze sw.SwitchValue
+            if sw.DefaultBody <> null then analyze sw.DefaultBody
+            for case in sw.Cases do
+                for tv in case.TestValues do analyze tv
+                analyze case.Body
+        | _ -> ()
+
+    and analyzeConditionalTest (exp: Expression) =
+        // Walk the test expression looking for table-typed parameter references.
+        // If a table-typed parameter is used in the test of a conditional (match expression),
+        // it requires the full record.
+        match exp with
+        | MethodCall m ->
+            // Check if any argument is a table-typed parameter access
+            let mutable found = false
+            if m.Object <> null then
+                match tryGetAlias m.Object with
+                | Some alias -> (getOrCreate alias).RequiresFullRecord <- true; found <- true
+                | None -> ()
+            for arg in m.Arguments do
+                match tryGetAlias arg with
+                | Some alias -> (getOrCreate alias).RequiresFullRecord <- true; found <- true
+                | None -> ()
+            if not found then
+                if m.Object <> null then analyzeConditionalTest m.Object
+                for arg in m.Arguments do analyzeConditionalTest arg
+        | Member m when m.Expression <> null ->
+            match tryGetAlias m.Expression with
+            | Some alias when isOptionOrNullableType m.Member.DeclaringType || m.Member.Name = "get_Tag" || m.Member.Name = "Tag" ->
+                (getOrCreate alias).RequiresFullRecord <- true
+            | _ -> analyzeConditionalTest m.Expression
+        | Unary u -> analyzeConditionalTest u.Operand
+        | Binary b -> analyzeConditionalTest b.Left; analyzeConditionalTest b.Right
+        | _ -> ()
+
+    analyze body
+    usageMap
+
 /// Visits a selectExpr expression in two passes:
 /// Pass 1: Walk the expression tree to identify database leaf sub-expressions and rewrite the tree.
 /// Pass 2 (at runtime): Use the compiled mapper with leaf values to produce the final result.
@@ -1188,6 +1364,8 @@ let visitSelectExpr<'T, 'Selected> (selectExpression: Expression<Func<'T, 'Selec
     let outerParamNames = System.Collections.Generic.HashSet<string>()
     // Maps outer param alias to its declared type (for determining optionality)
     let outerParamTypes = System.Collections.Generic.Dictionary<string, Type>()
+    // Projection shape analysis result (populated after unwrapBodyWithParams)
+    let mutable aliasUsage = System.Collections.Generic.Dictionary<string, AliasUsage>()
 
     /// Unwrap the Lambda -> Invoke -> Lambda nesting that F# CEs generate,
     /// collecting outer parameters along the way.
@@ -1264,6 +1442,88 @@ let visitSelectExpr<'T, 'Selected> (selectExpression: Expression<Func<'T, 'Selec
 
         | MethodCall m when isSqlHydraMethod m.Method ->
             rewriteSqlFunction m exp
+
+        // --- Option.map _.Field pattern (column-only when analysis says so) ---
+        | MethodCall m when m.Method.Name = "op_PipeRight" && m.Arguments.Count = 2 ->
+            let source = m.Arguments.[0]
+            let rec containsOptionMap (e: Expression) =
+                match e with
+                | :? MethodCallExpression as mc ->
+                    (mc.Method.Name = "Map" && mc.Method.DeclaringType <> null && mc.Method.DeclaringType.Name = "OptionModule")
+                    || mc.Arguments |> Seq.exists containsOptionMap
+                    || (mc.Object <> null && containsOptionMap mc.Object)
+                | :? LambdaExpression as lam -> containsOptionMap lam.Body
+                | _ -> false
+            if containsOptionMap m.Arguments.[1] then
+                // Try to extract the field accessor lambda
+                let rec findMapLambda (e: Expression) =
+                    match e with
+                    | :? MethodCallExpression as invoke when invoke.Method.Name = "Invoke" ->
+                        match invoke.Arguments.[0] with
+                        | :? MethodCallExpression as toFF when toFF.Method.Name = "ToFSharpFunc" ->
+                            match toFF.Arguments.[0] with
+                            | :? LambdaExpression as mapLam -> Some mapLam
+                            | _ -> None
+                        | _ -> None
+                    | _ -> None
+                // Resolve source alias
+                let sourceAlias =
+                    let rec tryResolve (e: Expression) =
+                        match e with
+                        | Parameter p -> Some (resolveTableAlias p)
+                        | Member inner when inner.Member.DeclaringType <> null && isOptionOrNullableType inner.Member.DeclaringType ->
+                            tryResolve inner.Expression
+                        | _ -> None
+                    tryResolve source
+                match sourceAlias, findMapLambda m.Arguments.[1] with
+                | Some alias, Some mapLam when
+                    aliasUsage.ContainsKey(alias) && not aliasUsage.[alias].RequiresFullRecord ->
+                    match mapLam.Body with
+                    | Member memberExp ->
+                        // Column-only: register a ColumnLeaf with isOpt=true (comes through Option.map)
+                        let isOuterOptional =
+                            match outerParamTypes.TryGetValue(alias) with
+                            | true, outerType -> isOptionType outerType
+                            | false, _ -> false
+                        let colType =
+                            if isOuterOptional then
+                                typedefof<Option<_>>.MakeGenericType(memberExp.Type)
+                            else
+                                memberExp.Type
+                        let key = $"{alias}.{memberExp.Member.Name}"
+                        getOrAddLeaf key
+                            (fun idx -> ColumnLeaf (alias, memberExp.Member.Name, colType, true, false, idx))
+                            colType
+                    | _ ->
+                        // Fall through: rewrite children
+                        let newArgs = m.Arguments |> Seq.map rewrite |> Seq.toArray
+                        let newObj = if m.Object <> null then rewrite m.Object else null
+                        let argsChanged = Seq.zip m.Arguments newArgs |> Seq.exists (fun (a, b) -> not (obj.ReferenceEquals(a, b)))
+                        let objChanged = m.Object <> null && not (obj.ReferenceEquals(newObj, m.Object))
+                        if argsChanged || objChanged then
+                            if m.Object <> null then Expression.Call(newObj, m.Method, newArgs) :> Expression
+                            else Expression.Call(m.Method, newArgs) :> Expression
+                        else exp
+                | _ ->
+                    // Full record needed or can't resolve: fall through to generic MethodCall rewrite
+                    let newArgs = m.Arguments |> Seq.map rewrite |> Seq.toArray
+                    let newObj = if m.Object <> null then rewrite m.Object else null
+                    let argsChanged = Seq.zip m.Arguments newArgs |> Seq.exists (fun (a, b) -> not (obj.ReferenceEquals(a, b)))
+                    let objChanged = m.Object <> null && not (obj.ReferenceEquals(newObj, m.Object))
+                    if argsChanged || objChanged then
+                        if m.Object <> null then Expression.Call(newObj, m.Method, newArgs) :> Expression
+                        else Expression.Call(m.Method, newArgs) :> Expression
+                    else exp
+            else
+                // Not an Option.map pipe: generic MethodCall rewrite
+                let newArgs = m.Arguments |> Seq.map rewrite |> Seq.toArray
+                let newObj = if m.Object <> null then rewrite m.Object else null
+                let argsChanged = Seq.zip m.Arguments newArgs |> Seq.exists (fun (a, b) -> not (obj.ReferenceEquals(a, b)))
+                let objChanged = m.Object <> null && not (obj.ReferenceEquals(newObj, m.Object))
+                if argsChanged || objChanged then
+                    if m.Object <> null then Expression.Call(newObj, m.Method, newArgs) :> Expression
+                    else Expression.Call(m.Method, newArgs) :> Expression
+                else exp
 
         // --- Generic recursive cases ---
         | Lambda x ->
@@ -1383,10 +1643,20 @@ let visitSelectExpr<'T, 'Selected> (selectExpression: Expression<Func<'T, 'Selec
         // --- Leaf detection ---
         | Parameter p when isTableType p.Type ->
             let alias = resolveTableAlias p
-            let key = $"__table:{alias}"
-            getOrAddLeaf key
-                (fun idx -> TableLeaf (alias, p.Type, idx))
-                p.Type
+            // Only create a TableLeaf if the analysis determined the full record is needed
+            let needsFullRecord =
+                match aliasUsage.TryGetValue(alias) with
+                | true, usage -> usage.RequiresFullRecord
+                | false, _ -> true // Default to full record if not analyzed
+            if needsFullRecord then
+                let key = $"__table:{alias}"
+                getOrAddLeaf key
+                    (fun idx -> TableLeaf (alias, p.Type, idx))
+                    p.Type
+            else
+                // Column-only alias: individual columns will be handled by member access cases
+                // Return the expression unchanged (it will be pruned by outer rewrite)
+                exp
 
         | Parameter _ -> exp
 
@@ -1489,6 +1759,10 @@ let visitSelectExpr<'T, 'Selected> (selectExpression: Expression<Func<'T, 'Selec
             originalExp.Type
 
     let actualBody = unwrapBodyWithParams (selectExpression :> Expression)
+
+    // Run projection shape analysis before rewriting
+    aliasUsage <- analyzeProjectionShape actualBody outerParamNames outerParamTypes typeToAlias
+
     let rewrittenBody = rewrite actualBody
 
     // Build the leaf tuple type and compiled mapper

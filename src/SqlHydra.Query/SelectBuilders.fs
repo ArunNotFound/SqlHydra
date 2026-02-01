@@ -181,11 +181,20 @@ type SelectBuilder<'Selected, 'Mapped> () =
     member this.SelectExpr (state: QuerySource<'T, Query>, [<ProjectionParameter>] selectExpression: Expression<Func<'T, 'Selected>>) =
         let exprInfo = LinqExpressionVisitors.visitSelectExpr<'T, 'Selected> selectExpression
 
+        // Collect aliases that have a TableLeaf (full record); suppress individual ColumnLeafs for those aliases
+        let tableLeafAliases =
+            exprInfo.Leaves
+            |> List.choose (function
+                | LinqExpressionVisitors.TableLeaf (tableAlias, _, _) -> Some tableAlias
+                | _ -> None)
+            |> Set.ofList
+
         let queryWithSelectedColumns =
             exprInfo.Leaves
             |> List.fold (fun (q: Query) leaf ->
                 match leaf with
                 | LinqExpressionVisitors.TableLeaf (tableAlias, _, _) -> q.Select($"%s{tableAlias}.*")
+                | LinqExpressionVisitors.ColumnLeaf (tableAlias, _, _, _, _, _) when tableLeafAliases.Contains(tableAlias) -> q // Suppressed by TableLeaf
                 | LinqExpressionVisitors.ColumnLeaf (tableAlias, column, _, _, _, _) -> q.Select($"%s{tableAlias}.%s{column}")
                 | LinqExpressionVisitors.SqlExprLeaf (sqlFragment, _, alias, _) -> q.SelectRaw($"{sqlFragment} AS {alias}")
             ) state.Query

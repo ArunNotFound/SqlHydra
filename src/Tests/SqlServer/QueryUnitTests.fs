@@ -998,4 +998,25 @@ let ``selectExpr - leftJoin with match`` () =
         }
         |> toSql
 
-    sql.Contains("SELECT [r].*, [o].[SalesOrderID] FROM") =! true  
+    sql.Contains("SELECT [r].*, [o].[SalesOrderID] FROM") =! true
+
+[<Test>]
+let ``selectExpr - leftJoin column-only`` () =
+    let sql =
+        select {
+            for o in Sales.SalesOrderHeader do
+            leftJoin sr in Sales.SalesOrderHeaderSalesReason on (o.SalesOrderID = sr.Value.SalesOrderID)
+            leftJoin r in Sales.SalesReason on (sr.Value.SalesReasonID = r.Value.SalesReasonID)
+            selectExpr (
+                o.AccountNumber,
+                r |> Option.map _.ReasonType,
+                r |> Option.map _.Name
+            )
+        }
+        |> toSql
+
+    // Should select only specific columns, not r.*
+    sql.Contains("[o].[AccountNumber]") =! true
+    sql.Contains("[r].[ReasonType]") =! true
+    sql.Contains("[r].[Name]") =! true
+    sql.Contains("[r].*") =! false
