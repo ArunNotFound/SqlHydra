@@ -198,6 +198,7 @@ let ``selectExpr - leftJoin - provenance`` () = task {
             selectExpr (
                 match r with
                 // FIX: Provenance-aware table alias resolution should ensure that `reason` here is linked back to `r` in the SQL generation.
+                // reason.ReasonType is uppercased in the SQL SELECT, and "Order:" is uppercased in .NET! How cool is that?! :)
                 | Some reason -> $"Order: {o.SalesOrderID}, Reason: {UPPER(reason.ReasonType)}\n"
                 | None -> "No Reason Given"
                 |> fun text -> text.Replace("Order:", "ORDER:")
