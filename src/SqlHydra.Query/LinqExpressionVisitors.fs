@@ -1235,6 +1235,19 @@ let visitSelectExpr<'T, 'Selected> (selectExpression: Expression<Func<'T, 'Selec
             resolveAliasFromExpr inner.Expression
         | _ -> visitAlias e
 
+    /// Returns the table alias if the expression has provenance from a CE table parameter.
+    let rec getProvenance (e: Expression) : string option =
+        match e with
+        | Parameter p ->
+            if outerParamNames.Contains(p.Name) then Some p.Name
+            else
+                match paramToAlias.TryGetValue(p) with
+                | true, alias -> Some alias
+                | false, _ -> None
+        | Member m when m.Member.DeclaringType <> null && isOptionOrNullableType m.Member.DeclaringType ->
+            getProvenance m.Expression
+        | _ -> None
+
     let rec rewrite (exp: Expression) : Expression =
         match exp with
         // --- SQL leaf detection (before generic cases) ---
@@ -1277,6 +1290,16 @@ let visitSelectExpr<'T, 'Selected> (selectExpression: Expression<Func<'T, 'Selec
             else exp
 
         | :? InvocationExpression as inv ->
+            // Propagate provenance: if this is Invoke(Lambda(params), args),
+            // set provenance for lambda params from the invocation arguments.
+            match inv.Expression with
+            | :? LambdaExpression as lam ->
+                for i in 0 .. min (lam.Parameters.Count - 1) (inv.Arguments.Count - 1) do
+                    let param = lam.Parameters.[i]
+                    match getProvenance inv.Arguments.[i] with
+                    | Some alias -> paramToAlias.[param] <- alias
+                    | None -> ()
+            | _ -> ()
             let newExpr = rewrite inv.Expression
             let newArgs = inv.Arguments |> Seq.map rewrite |> Seq.toArray
             let exprChanged = not (obj.ReferenceEquals(newExpr, inv.Expression))
@@ -1302,6 +1325,16 @@ let visitSelectExpr<'T, 'Selected> (selectExpression: Expression<Func<'T, 'Selec
             Expression.ListInit(newExpr, li.Initializers) :> Expression
 
         | :? BlockExpression as blk ->
+            // Propagate provenance for block variables assigned from provenance-bearing expressions
+            for expr in blk.Expressions do
+                if expr.NodeType = ExpressionType.Assign then
+                    let bin = expr :?> BinaryExpression
+                    match bin.Left with
+                    | Parameter p ->
+                        match getProvenance bin.Right with
+                        | Some alias -> paramToAlias.[p] <- alias
+                        | None -> ()
+                    | _ -> ()
             let newExprs = blk.Expressions |> Seq.map rewrite |> Seq.toArray
             Expression.Block(blk.Type, blk.Variables, newExprs) :> Expression
 
@@ -1417,7 +1450,37 @@ let visitSelectExpr<'T, 'Selected> (selectExpression: Expression<Func<'T, 'Selec
 
     and rewriteSqlFunction (m: MethodCallExpression) (originalExp: Expression) =
         let qualifyCol alias (mem: MemberInfo) = $"{alias}.{mem.Name}"
-        let sqlFragment = visitSqlFn qualifyCol (m :> Expression)
+        /// Like visitSqlFn but uses provenance-aware alias resolution
+        /// so that pattern variables (e.g., from match) resolve to
+        /// the correct table alias.
+        let rec visitSqlFnWithProvenance (exp: Expression) : string =
+            match exp with
+            | MethodCall m ->
+                let fnName = m.Method.Name
+                let args =
+                    m.Arguments
+                    |> Seq.map (fun arg ->
+                        match arg with
+                        | Member mem ->
+                            let alias = resolveAliasFromExpr mem.Expression
+                            qualifyCol alias mem.Member
+                        | Constant c when c.Value = null ->
+                            "NULL"
+                        | Constant c when c.Type = typeof<string> ->
+                            $"'{c.Value}'"
+                        | Constant c ->
+                            sprintf "%O" c.Value
+                        | MethodCall _ as nested ->
+                            visitSqlFnWithProvenance nested
+                        | _ ->
+                            notImplMsg $"Unsupported argument type in SQL function: {arg.NodeType}"
+                    )
+                    |> String.concat ", "
+                $"{fnName}({args})"
+            | _ ->
+                notImplMsg $"Expected a method call expression but got: {exp.NodeType}"
+
+        let sqlFragment = visitSqlFnWithProvenance (m :> Expression)
         let exprAlias = $"__hydra_expr_{!sqlExprCounter}"
         sqlExprCounter := !sqlExprCounter + 1
         let key = $"__sqlfn:{sqlFragment}"

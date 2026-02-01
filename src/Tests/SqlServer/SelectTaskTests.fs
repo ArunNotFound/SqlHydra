@@ -189,7 +189,6 @@ open type SqlFn
 let ``selectExpr - leftJoin - provenance`` () = task {
 
     // `UPPER(reason.ReasonType)` should be `UPPER(r.ReasonType)` when added to SQL SELECT to prove provenance is maintained.
-
     let! results = 
         selectTask db  {
             for o in Sales.SalesOrderHeader do
@@ -198,6 +197,7 @@ let ``selectExpr - leftJoin - provenance`` () = task {
             where (isNotNullValue r.Value.Name)
             selectExpr (
                 match r with
+                // FIX: Provenance-aware table alias resolution should ensure that `reason` here is linked back to `r` in the SQL generation.
                 | Some reason -> $"Order: {o.SalesOrderID}, Reason: {UPPER(reason.ReasonType)}\n"
                 | None -> "No Reason Given"
                 |> fun text -> text.Replace("Order:", "ORDER:")
