@@ -182,9 +182,14 @@ let ``selectExpr - leftJoin 2`` () = task {
     gt0 results
 }
 
+open SqlHydra.Query.SqlServerExtensions
+open type SqlFn
 
 [<Test>]
-let ``selectExpr - leftJoin 3`` () = task {
+let ``selectExpr - leftJoin - provenance`` () = task {
+
+    // `UPPER(reason.ReasonType)` should be `UPPER(r.ReasonType)` when added to SQL SELECT to prove provenance is maintained.
+
     let! results = 
         selectTask db  {
             for o in Sales.SalesOrderHeader do
@@ -193,9 +198,9 @@ let ``selectExpr - leftJoin 3`` () = task {
             where (isNotNullValue r.Value.Name)
             selectExpr (
                 match r with
-                | Some reason -> $"Order: {o.SalesOrderID}, Reason: {reason.ReasonType}\n"
+                | Some reason -> $"Order: {o.SalesOrderID}, Reason: {UPPER(reason.ReasonType)}\n"
                 | None -> "No Reason Given"
-                |> fun text -> text.ToUpper()
+                |> fun text -> text.Replace("Order:", "ORDER:")
             )
             take 10
         }
