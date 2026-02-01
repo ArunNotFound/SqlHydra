@@ -16,11 +16,6 @@ open SqlServer.AdventureWorksNullableNet9
 open SqlServer.AdventureWorksNullableNet10
 #endif
 
-let openContext() = 
-    let compiler = SqlKata.Compilers.SqlServerCompiler()
-    let conn = openConnection()
-    new QueryContext(conn, compiler)
-
 let stubbedErrorLog = 
     {
         dbo.ErrorLog.ErrorLogID = 0 // Exclude
@@ -37,7 +32,7 @@ let stubbedErrorLog =
 [<Test>]
 let ``Select Column Aggregates From Product IDs 1-3``() = task {
     let! aggregates =
-        selectTask openContext {
+        selectTask db {
             for p in Production.Product do
             where (isNotNullValue p.ProductSubcategoryID)
             groupBy p.ProductSubcategoryID
@@ -60,7 +55,7 @@ let ``Select Column Aggregates From Product IDs 1-3``() = task {
 [<Test>]
 let ``Select Column Aggregates``() = task {
     let! aggregates =
-        selectTask openContext {
+        selectTask db {
             for p in Production.Product do
             where (isNotNullValue p.ProductSubcategoryID)
             groupBy p.ProductSubcategoryID
@@ -74,7 +69,7 @@ let ``Select Column Aggregates``() = task {
 [<Test>]
 let ``Sorted Aggregates - Top 5 categories with highest avg price products``() = task {
     let! aggregates =
-        selectTask openContext {
+        selectTask db {
             for p in Production.Product do
             where (p.ProductSubcategoryID.HasValue = true)
             groupBy p.ProductSubcategoryID
@@ -99,7 +94,7 @@ let ``Where subqueryMany``() = task {
         }
 
     let! top5Categories =
-        selectTask openContext {
+        selectTask db {
             for c in Production.ProductCategory do
             where (Nullable c.ProductCategoryID |=| subqueryMany top5CategoryIdsWithHighestAvgPrices)
             select c.Name
@@ -111,7 +106,7 @@ let ``Where subqueryMany``() = task {
 [<Test>]
 let ``Select Columns with Option``() = task {
     let! values =
-        selectTask openContext {
+        selectTask db {
             for p in Production.Product do
             where (p.ProductSubcategoryID.HasValue)
             select (p.ProductSubcategoryID, p.ListPrice)
@@ -123,8 +118,6 @@ let ``Select Columns with Option``() = task {
 
 [<Test>]
 let ``InsertGetId Test``() = task {
-    use ctx = openContext()
-
     let errorLog = 
         {
             dbo.ErrorLog.ErrorLogID = 0 // Exclude
@@ -139,7 +132,7 @@ let ``InsertGetId Test``() = task {
         }
 
     let! errorLogId = 
-        insertTask ctx {
+        insertTask db {
             for e in dbo.ErrorLog do
             entity errorLog
             getId e.ErrorLogID
@@ -150,8 +143,6 @@ let ``InsertGetId Test``() = task {
 
 [<Test>]
 let ``InsertGetIdAsync Test``() = task {
-    use ctx = openContext()
-
     let errorLog = 
         {
             dbo.ErrorLog.ErrorLogID = 0 // Exclude
@@ -166,7 +157,7 @@ let ``InsertGetIdAsync Test``() = task {
         }
 
     let! result = 
-        insertTask ctx {
+        insertTask db {
             for e in dbo.ErrorLog do
             entity errorLog
             getId e.ErrorLogID
@@ -177,16 +168,16 @@ let ``InsertGetIdAsync Test``() = task {
 
 [<Test>]
 let ``Update Set Individual Fields``() = task {
-    use ctx = openContext()
+    use! shared = db.OpenContextAsync()
         
     let! row = 
-        selectTask ctx {
+        selectTask shared {
             for e in dbo.ErrorLog do
             head
         }
 
     let! result = 
-        updateTask ctx {
+        updateTask shared {
             for e in dbo.ErrorLog do
             set e.ErrorNumber 123
             set e.ErrorMessage "ERROR #123"
@@ -200,16 +191,16 @@ let ``Update Set Individual Fields``() = task {
 
 [<Test>]
 let ``UpdateAsync Set Individual Fields``() = task {
-    use ctx = openContext()
+    use! shared = db.OpenContextAsync()
 
     let! row = 
-        selectTask ctx {
+        selectTask shared {
             for e in dbo.ErrorLog do
             head
         }
 
     let! result = 
-        updateTask ctx {
+        updateTask shared {
             for e in dbo.ErrorLog do
             set e.ErrorNumber (row.ErrorNumber + 1)
             set e.ErrorProcedure null
@@ -221,10 +212,10 @@ let ``UpdateAsync Set Individual Fields``() = task {
 
 [<Test>]
 let ``Update Entity``() = task {
-    use ctx = openContext()
+    use! shared = db.OpenContextAsync()
         
     let! row = 
-        selectTask ctx {
+        selectTask shared {
             for e in dbo.ErrorLog do
             head
         }
@@ -239,7 +230,7 @@ let ``Update Entity``() = task {
     row.UserName <- "jmarr"
 
     let! result = 
-        updateTask ctx {
+        updateTask shared {
             for e in dbo.ErrorLog do
             entity row
             excludeColumn e.ErrorLogID

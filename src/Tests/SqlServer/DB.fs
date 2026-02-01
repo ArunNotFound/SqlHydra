@@ -1,8 +1,5 @@
 ﻿module SqlServer.DB
 
-open Microsoft.Data.SqlClient
-open SqlHydra.Query
-
 #if NET8_0
 open SqlServer.AdventureWorksNet8
 #endif
@@ -21,9 +18,6 @@ let server = "localhost,12019"
 
 let connectionString = $@"Server={server};Database=AdventureWorks;User=sa;Password=Password#123;Connect Timeout=3;TrustServerCertificate=True"
 let db = QueryContextFactory.Create(connectionString, printf "SQL: %O")
-
-let openConnection() = 
-    db.OpenConnection() :?> SqlConnection
 
 let toSql (query: SqlHydra.Query.SelectQuery) = 
     let compiler = SqlKata.Compilers.SqlServerCompiler()

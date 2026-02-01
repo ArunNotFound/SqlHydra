@@ -17,11 +17,6 @@ open Sqlite.AdventureWorksNet9
 open Sqlite.AdventureWorksNet10
 #endif
 
-let openContext() = 
-    let compiler = SqlKata.Compilers.SqliteCompiler()
-    let conn = openConnection()
-    new QueryContext(conn, compiler)
-
 let stubbedErrorLog = 
     {
         main.ErrorLog.ErrorLogID = 0L // Exclude
@@ -38,7 +33,7 @@ let stubbedErrorLog =
 [<Test>]
 let ``Where City Starts With S``() = task {
     let! addresses =
-        selectTask openContext {
+        selectTask db {
             for a in main.Address do
             where (a.City |=| [ "Seattle"; "Santa Cruz" ])
         }
@@ -50,7 +45,7 @@ let ``Where City Starts With S``() = task {
 [<Test>]
 let ``Select City Column Where City Starts with S``() = task {
     let! cities =
-        selectTask openContext {
+        selectTask db {
             for a in main.Address do
             where (a.City =% "S%")
             select a.City
@@ -63,7 +58,7 @@ let ``Select City Column Where City Starts with S``() = task {
 [<Test>]
 let ``Inner Join Orders-Details``() = task {
     let! results =
-        selectTask openContext {
+        selectTask db {
             for o in main.SalesOrderHeader do
             join d in main.SalesOrderDetail on (o.SalesOrderID = d.SalesOrderID)
             where (o.OnlineOrderFlag = 0L)
@@ -82,7 +77,7 @@ let ``Where subqueryOne``() = task {
         }
 
     let! productsWithAboveAveragePrice =
-        selectTask openContext {
+        selectTask db {
             for p in main.Product do
             where (p.ListPrice > subqueryOne avgListPrice)
             select (p.Name, p.ListPrice)
@@ -93,8 +88,6 @@ let ``Where subqueryOne``() = task {
 
 [<Test>]
 let ``InsertGetId Test``() = task {
-    use ctx = openContext()
-
     let errorLog = 
         {
             main.ErrorLog.ErrorLogID = 0L // Exclude
@@ -108,21 +101,18 @@ let ``InsertGetId Test``() = task {
             main.ErrorLog.UserName = "jmarr"
         }
 
-    let errorLogId = 
-        insert {
+    let! errorLogId = 
+        insertTask db {
             for e in main.ErrorLog do
             entity errorLog
             getId e.ErrorLogID
         }
-        |> ctx.Insert
 
     Assert.IsTrue(errorLogId > 0L, "Expected returned ID to be > 0")
 }
 
 [<Test>]
 let ``InsertGetIdAsync Test``() = task {
-    use ctx = openContext()
-
     let errorLog = 
         {
             main.ErrorLog.ErrorLogID = 0L // Exclude
@@ -137,22 +127,19 @@ let ``InsertGetIdAsync Test``() = task {
         }
 
     let! result = 
-        insert {
+        insertTask db {
             for e in main.ErrorLog do
             entity errorLog
             getId e.ErrorLogID
         }
-        |> ctx.InsertAsync
 
     result >! 0L
 }
 
 [<Test>]
 let ``Update Set Individual Fields``() = task {
-    use ctx = openContext()
-
-    let result = 
-        update {
+    let! result = 
+        updateTask db {
             for e in main.ErrorLog do
             set e.ErrorNumber 123L
             set e.ErrorMessage "ERROR #123"
@@ -160,17 +147,14 @@ let ``Update Set Individual Fields``() = task {
             set e.ErrorProcedure None
             where (e.ErrorLogID = 1L)
         }
-        |> ctx.Update
 
     printfn "result: %i" result
 }
 
 [<Test>]
 let ``UpdateAsync Set Individual Fields``() = task {
-    use ctx = openContext()
-
     let! result = 
-        update {
+        updateTask db {
             for e in main.ErrorLog do
             set e.ErrorNumber 123L
             set e.ErrorMessage "ERROR #123"
@@ -178,15 +162,12 @@ let ``UpdateAsync Set Individual Fields``() = task {
             set e.ErrorProcedure None
             where (e.ErrorLogID = 1L)
         }
-        |> ctx.UpdateAsync
 
     printfn "result: %i" result
 }
 
 [<Test>]
 let ``Update Entity``() = task {
-    use ctx = openContext()
-
     let errorLog = 
         {
             main.ErrorLog.ErrorLogID = 2L
@@ -200,54 +181,47 @@ let ``Update Entity``() = task {
             main.ErrorLog.UserName = "jmarr"
         }
 
-    let result = 
-        update {
+    let! result = 
+        updateTask db {
             for e in main.ErrorLog do
             entity errorLog
             excludeColumn e.ErrorLogID
             where (e.ErrorLogID = errorLog.ErrorLogID)
         }
-        |> ctx.Update
 
     printfn "result: %i" result
 }
 
 [<Test>]
 let ``Delete Test``() = task {
-    use ctx = openContext()
-
-    let result = 
-        delete {
+    let! result = 
+        deleteTask db {
             for e in main.ErrorLog do
             where (e.ErrorLogID = 5L)
         }
-        |> ctx.Delete
 
     printfn "result: %i" result
 }
 
 [<Test>]
 let ``DeleteAsync Test``() = task {
-    use ctx = openContext()
-
     let! result = 
-        delete {
+        deleteTask db {
             for e in main.ErrorLog do
             where (e.ErrorLogID = 5L)
         }
-        |> ctx.DeleteAsync
 
     printfn "result: %i" result
 }
 
 [<Test>]
 let ``Multiple Inserts``() = task {
-    use ctx = openContext()
+    use! shared = db.OpenContextAsync()
 
-    ctx.BeginTransaction()
+    shared.BeginTransaction()
 
     let! _ = 
-        deleteTask ctx {
+        deleteTask shared {
             for e in main.ErrorLog do
             deleteAll
         }
@@ -267,7 +241,7 @@ let ``Multiple Inserts``() = task {
                 entities errorLogs
                 excludeColumn e.ErrorLogID
             }
-            |> ctx.InsertAsync
+            |> shared.InsertAsync
 
         Assert.AreEqual(rowsInserted, 3, "Expected 3 rows to be inserted")
 
@@ -275,7 +249,7 @@ let ``Multiple Inserts``() = task {
         ()
 
     let! results =
-        selectTask ctx {
+        selectTask shared {
             for e in main.ErrorLog do
             select e.ErrorNumber
         }
@@ -284,17 +258,17 @@ let ``Multiple Inserts``() = task {
     
     errorNumbers =! [ 400L; 401L; 402L ]
 
-    ctx.RollbackTransaction()
+    shared.RollbackTransaction()
 }
 
 [<Test>]
 let ``Distinct Test``() = task {
-    use ctx = openContext()
+    use! shared = db.OpenContextAsync()
 
-    ctx.BeginTransaction()
+    shared.BeginTransaction()
 
     let! _ = 
-        deleteTask ctx {
+        deleteTask shared {
             for e in main.ErrorLog do
             deleteAll
         }
@@ -312,7 +286,7 @@ let ``Distinct Test``() = task {
                 entities errorLogs
                 excludeColumn e.ErrorLogID
             }
-            |> ctx.InsertAsync
+            |> shared.InsertAsync
 
         Assert.AreEqual(rowsInserted, 3, "Expected 3 rows to be inserted")
 
@@ -320,13 +294,13 @@ let ``Distinct Test``() = task {
         ()
 
     let! results =
-        selectTask ctx {
+        selectTask shared {
             for e in main.ErrorLog do
             select e.ErrorNumber
         }
 
     let! distinctResults =
-        selectTask ctx {
+        selectTask shared {
             for e in main.ErrorLog do
             select e.ErrorNumber
             distinct
@@ -335,13 +309,13 @@ let ``Distinct Test``() = task {
     results |> Seq.length =! 3
     distinctResults |> Seq.length =! 1
 
-    ctx.RollbackTransaction()
+    shared.RollbackTransaction()
 }
 
 [<Test>]
 let ``Count Test``() = task {
-    use ctx = openContext()
-    ctx.BeginTransaction()
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
 
     for i in [0..2] do
         let! result = 
@@ -350,7 +324,7 @@ let ``Count Test``() = task {
                 entity stubbedErrorLog
                 getId e.ErrorLogID
             }
-            |> ctx.InsertAsync
+            |> shared.InsertAsync
         ()
 
     let! count = 
@@ -358,19 +332,19 @@ let ``Count Test``() = task {
             for e in main.ErrorLog do
             count
         }
-        |> ctx.CountAsync
+        |> shared.CountAsync
 
     count >! 0
-    ctx.RollbackTransaction()
+    shared.RollbackTransaction()
 }
 
 [<Test>]
 let ``OnConflictDoUpdate``() = task {
-    use ctx = openContext()
-    ctx.BeginTransaction()
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
 
     let upsertAddress address = 
-        insertTask ctx {
+        insertTask shared {
             for a in main.Address do
             entity address
             onConflictDoUpdate a.AddressID (
@@ -385,7 +359,7 @@ let ``OnConflictDoUpdate``() = task {
         } :> Task
 
     let queryAddress id = 
-        selectTask ctx {
+        selectTask shared {
             for a in main.Address do
             where (a.AddressID = id)
             toList
@@ -418,15 +392,13 @@ let ``OnConflictDoUpdate``() = task {
     r2.Length =! 1
     r2.[0] =! updatedAddress
 
-    ctx.RollbackTransaction()
+    shared.RollbackTransaction()
 }
 
 [<Test>]
 let ``SqlFn - SQLite functions smoke test``() = task {
-    use ctx = openContext()
-
     let! results =
-        selectTask ctx {
+        selectTask db {
             for a in main.Address do
             select (a.City, length a.City, upper a.City, ifnull(a.AddressLine2, "N/A"))
             take 1

@@ -18,16 +18,10 @@ open Oracle.AdventureWorksNet9
 open Oracle.AdventureWorksNet10
 #endif
 
-let openContext() = 
-    let compiler = SqlKata.Compilers.OracleCompiler()
-    let conn = new OracleConnection(connectionString)
-    conn.Open()
-    new QueryContext(conn, compiler)
-
 [<Test>]
 let ``Where Name Contains``() = task {
     let! addresses =
-        selectTask openContext {
+        selectTask db {
             for c in OT.CUSTOMERS do
             where (c.NAME |=| [ "ABC Corp"; "XYZ Ltd" ])
         }
@@ -39,7 +33,7 @@ let ``Where Name Contains``() = task {
 [<Test>]
 let ``Select Address Column Where Address Contains USA``() = task {
     let! cities =
-        selectTask openContext {
+        selectTask db {
             for c in OT.CUSTOMERS do
             where (c.ADDRESS =% "%USA")
             select c.ADDRESS
@@ -52,7 +46,7 @@ let ``Select Address Column Where Address Contains USA``() = task {
 [<Test>]
 let ``Inner Join Orders-Details``() = task {
     let! results =
-        selectAsync openContext {
+        selectAsync db {
             for o in OT.ORDERS do
             join d in OT.ORDER_ITEMS on (o.ORDER_ID = d.ORDER_ID)
             where (o.STATUS = "Shipped")
@@ -64,7 +58,7 @@ let ``Inner Join Orders-Details``() = task {
 [<Test>]
 let ``Product with Category name``() = task {
     let! rows = 
-        selectAsync openContext {
+        selectAsync db {
             for p in OT.PRODUCTS do
             join c in OT.PRODUCT_CATEGORIES on (p.CATEGORY_ID = c.CATEGORY_ID)
             select (c.CATEGORY_NAME, p)
@@ -76,7 +70,7 @@ let ``Product with Category name``() = task {
 [<Test>]
 let ``Select Column Aggregates From Product IDs 1-3``() = task {
     let! aggregates =
-        selectAsync openContext {
+        selectAsync db {
             for p in OT.PRODUCTS do
             join c in OT.PRODUCT_CATEGORIES on (p.CATEGORY_ID = c.CATEGORY_ID)
             where (p.LIST_PRICE <> None)
@@ -113,7 +107,7 @@ let ``Aggregate Subquery One``() = task {
         }
 
     let! productsWithHigherThanAvgPrice = 
-        selectAsync openContext {
+        selectAsync db {
             for p in OT.PRODUCTS do
             where (p.LIST_PRICE.Value > subqueryOne avgListPrice)
             orderByDescending p.LIST_PRICE
@@ -131,7 +125,7 @@ let ``Aggregate Subquery One``() = task {
 [<Test; Ignore "Ignore">]
 let ``Select Column Aggregates``() = task {
     let! aggregates = 
-        selectAsync openContext {
+        selectAsync db {
             for p in OT.PRODUCTS do
             where (p.LIST_PRICE <> None)
             groupBy p.CATEGORY_ID
@@ -145,7 +139,7 @@ let ``Select Column Aggregates``() = task {
 [<Test; Ignore "Ignore">]
 let ``Sorted Aggregates - Top 5 categories with highest avg price products``() = task {
     let! aggregates =
-        selectTask openContext {
+        selectTask db {
             for p in OT.PRODUCTS do
             where (p.LIST_PRICE <> None)
             groupBy p.CATEGORY_ID
@@ -172,7 +166,7 @@ let ``Where subqueryMany``() = task {
         }
 
     let! top5Categories =
-        selectTask openContext {
+        selectTask db {
             for c in OT.PRODUCT_CATEGORIES do
             where (c.CATEGORY_ID |=| subqueryMany top5CategoryIdsWithHighestAvgPrices)
             select c.CATEGORY_NAME
@@ -190,7 +184,7 @@ let ``Where subqueryOne``() = task {
         } 
 
     let! productsWithAboveAveragePrice =
-        selectAsync openContext {
+        selectAsync db {
             for p in OT.PRODUCTS do
             where (p.LIST_PRICE <> None && p.LIST_PRICE.Value > subqueryOne avgListPrice)
             select (p.PRODUCT_NAME, p.LIST_PRICE.Value)
@@ -202,7 +196,7 @@ let ``Where subqueryOne``() = task {
 [<Test>]
 let ``Select Columns with Option``() = task {
     let! values =
-        selectAsync openContext {
+        selectAsync db {
             for p in OT.PRODUCTS do
             where (p.LIST_PRICE <> None)
             select (p.CATEGORY_ID, p.LIST_PRICE)
@@ -214,10 +208,10 @@ let ``Select Columns with Option``() = task {
 
 [<Test>]
 let ``Insert Country``() = task {
-    use ctx = openContext()
+    use! shared = db.OpenContextAsync()
 
     let! results = 
-        insert {
+        insertTask shared {
             into OT.COUNTRIES
             entity 
                 {
@@ -226,12 +220,11 @@ let ``Insert Country``() = task {
                     OT.COUNTRIES.REGION_ID = Some 2
                 }
         }
-        |> ctx.InsertAsync
 
     results =! 1
 
     let! wl =
-        selectTask ctx {
+        selectTask shared {
             for c in OT.COUNTRIES do
             where (c.COUNTRY_ID = "WL")
         }
@@ -241,20 +234,19 @@ let ``Insert Country``() = task {
 
 [<Test>]
 let ``Update Country``() = task {
-    use ctx = openContext()
+    use! shared = db.OpenContextAsync()
 
     let! results = 
-        update {
+        updateTask db {
             for c in OT.COUNTRIES do
             set c.COUNTRY_NAME "Wonder Land"
             where (c.COUNTRY_ID = "WL")
         }
-        |> ctx.UpdateAsync
 
     results >! 0
 
     let! wl =
-        selectTask ctx {
+        selectTask shared {
             for c in OT.COUNTRIES do
                 where (c.COUNTRY_NAME = "Wonder Land")
         }
@@ -264,17 +256,16 @@ let ``Update Country``() = task {
 
 [<Test>]
 let ``Delete Country``() = task {
-    use ctx = openContext()
+    use! shared = db.OpenContextAsync()
 
     let! _ = 
-        delete {
+        deleteTask db {
             for c in OT.COUNTRIES do
             where (c.COUNTRY_ID = "WL")
         }
-        |> ctx.DeleteAsync
 
     let! wl =
-        selectTask ctx {
+        selectTask db {
             for c in OT.COUNTRIES do
             where (c.COUNTRY_ID = "WL")
         }
@@ -284,8 +275,8 @@ let ``Delete Country``() = task {
 
 [<Test>]
 let ``Insert and Get Id``() = task {
-    use ctx = openContext()
-    ctx.BeginTransaction()
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
 
     let! regionId = 
         insert {
@@ -297,10 +288,10 @@ let ``Insert and Get Id``() = task {
                 }
             getId r.REGION_ID
         }
-        |> ctx.InsertAsync
+        |> shared.InsertAsync
 
     let! region =
-        selectTask ctx {
+        selectTask shared {
             for r in OT.REGIONS do
             where (r.REGION_ID = regionId)
             tryHead
@@ -315,9 +306,9 @@ let ``Insert and Get Id``() = task {
         
 [<Test>]
 let ``Multiple Inserts``() = task {
-    use ctx = openContext()
+    use! shared = db.OpenContextAsync()
 
-    ctx.BeginTransaction()
+    shared.BeginTransaction()
 
     let countriesAL1 = 
         [ 0 .. 2 ] 
@@ -337,12 +328,12 @@ let ``Multiple Inserts``() = task {
                 into OT.COUNTRIES
                 entities countries
             }
-            |> ctx.InsertAsync
+            |> shared.InsertAsync
 
         Assert.AreEqual(rowsInserted, 3, "Expected 3 rows to be inserted")
 
         let! results =
-            selectTask ctx {
+            selectTask shared {
                 for c in OT.COUNTRIES do
                 where (c.COUNTRY_ID =% "X%")
                 orderBy c.COUNTRY_ID
@@ -355,14 +346,14 @@ let ``Multiple Inserts``() = task {
     | None -> 
         ()
 
-    ctx.RollbackTransaction()
+    shared.RollbackTransaction()
 }
 
 [<Test>]
 let ``Distinct Test``() = task {
-    use ctx = openContext()
+    use! shared = db.OpenContextAsync()
 
-    ctx.BeginTransaction()
+    shared.BeginTransaction()
 
     let countriesAL1 = 
         [ 0 .. 2 ] 
@@ -378,7 +369,7 @@ let ``Distinct Test``() = task {
     match countriesAL1 with
     | Some countries ->
         let! rowsInserted = 
-            insertTask ctx {
+            insertTask shared {
                 for e in OT.COUNTRIES do
                 entities countries
             }
@@ -386,14 +377,14 @@ let ``Distinct Test``() = task {
         Assert.AreEqual(rowsInserted, 3, "Expected 3 rows to be inserted")
 
         let! results =
-            selectTask ctx {
+            selectTask shared {
                 for c in OT.COUNTRIES do
                 where (c.COUNTRY_ID =% "X%")
                 select c.COUNTRY_NAME
             }
 
         let! distinctResults =
-            selectTask ctx {
+            selectTask shared {
                 for c in OT.COUNTRIES do
                 where (c.COUNTRY_ID =% "X%")
                 select c.REGION_ID
@@ -404,15 +395,13 @@ let ``Distinct Test``() = task {
         distinctResults |> Seq.length =! 1
     | None -> ()
 
-    ctx.RollbackTransaction()
+    shared.RollbackTransaction()
 }
 
 [<Test>]
 let ``SqlFn - Oracle functions smoke test``() = task {
-    use ctx = openContext()
-
     let! results =
-        selectTask ctx {
+        selectTask db {
             for c in OT.CUSTOMERS do
             select (c.NAME, LENGTH c.NAME, UPPER c.NAME, NVL(c.WEBSITE, "N/A"))
             take 1
