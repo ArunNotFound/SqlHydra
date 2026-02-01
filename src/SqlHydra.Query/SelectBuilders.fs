@@ -111,6 +111,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
         $"%s{alias}.%s{col.Name}"
 
     member val MapFn = Option<Func<'Selected, 'Mapped>>.None with get, set
+    member val CancellationToken = CancellationToken.None with get, set
     
     member this.For (state: QuerySource<'T>, [<ReflectedDefinition>] forExpr: FSharp.Quotations.Expr<'T -> QuerySource<'T>>) =
         let tableAlias = QuotationVisitor.visitFor forExpr
@@ -463,8 +464,14 @@ type SelectBuilder<'Selected, 'Mapped> () =
 
     /// Sets query to return DISTINCT values
     [<CustomOperation("distinct", MaintainsVariableSpace = true)>]
-    member this.Distinct (state: QuerySource<'T, Query>) = 
+    member this.Distinct (state: QuerySource<'T, Query>) =
         QuerySource<'T, Query>(state.Query.Distinct(), state.TableMappings)
+
+    /// Sets a CancellationToken for the query execution.
+    [<CustomOperation("cancel", MaintainsVariableSpace = true)>]
+    member this.Cancel (state: QuerySource<'T, Query>, cancellationToken: CancellationToken) =
+        this.CancellationToken <- cancellationToken
+        state
 
     /// Maps the query results into a seq.
     [<CustomOperation("mapSeq", MaintainsVariableSpace = true)>]
@@ -551,25 +558,23 @@ type SelectQueryBuilder<'Selected, 'Mapped> () =
 
 
 /// A select builder that returns a Task result.
-type SelectTaskBuilder<'Selected, 'Mapped> (ct: ContextType, cancellationToken: CancellationToken) =
+type SelectTaskBuilder<'Selected, 'Mapped> (ct: ContextType) =
     inherit SelectBuilder<'Selected, 'Mapped>()
-
-    new(ct) = SelectTaskBuilder(ct, CancellationToken.None)
 
     member this.RunSelected(query: Query, resultModifier) =
         task {
             let! ctx = ContextUtils.getContext ct
             try
                 use cmd = ctx.BuildCommand(query)
-                use! reader = cmd.ExecuteReaderAsync(cancellationToken)
+                use! reader = cmd.ExecuteReaderAsync(this.CancellationToken)
                 let readEntity = Hydration.buildRowReader<'Selected> reader
                 let results = ResizeArray<'Selected>()
 
-                let! hasMore = reader.ReadAsync(cancellationToken)
+                let! hasMore = reader.ReadAsync(this.CancellationToken)
                 let mutable hasMore = hasMore
-                while hasMore && not cancellationToken.IsCancellationRequested do
+                while hasMore && not this.CancellationToken.IsCancellationRequested do
                     results.Add(readEntity())
-                    let! hasMore' = reader.ReadAsync(cancellationToken)
+                    let! hasMore' = reader.ReadAsync(this.CancellationToken)
                     hasMore <- hasMore'
 
                 return results :> seq<'Selected> |> resultModifier
@@ -582,15 +587,15 @@ type SelectTaskBuilder<'Selected, 'Mapped> (ct: ContextType, cancellationToken: 
             let! ctx = ContextUtils.getContext ct
             try
                 use cmd = ctx.BuildCommand(query)
-                use! reader = cmd.ExecuteReaderAsync(cancellationToken)
+                use! reader = cmd.ExecuteReaderAsync(this.CancellationToken)
                 let readEntity = Hydration.buildRowReader<'Selected> reader
                 let results = ResizeArray<'Mapped>()
 
-                let! hasMore = reader.ReadAsync(cancellationToken)
+                let! hasMore = reader.ReadAsync(this.CancellationToken)
                 let mutable hasMore = hasMore
-                while hasMore && not cancellationToken.IsCancellationRequested do
+                while hasMore && not this.CancellationToken.IsCancellationRequested do
                     results.Add(this.MapFn.Value.Invoke(readEntity()))
-                    let! hasMore' = reader.ReadAsync(cancellationToken)
+                    let! hasMore' = reader.ReadAsync(this.CancellationToken)
                     hasMore <- hasMore'
 
                 return results :> seq<'Mapped> |> resultModifier
@@ -603,17 +608,17 @@ type SelectTaskBuilder<'Selected, 'Mapped> (ct: ContextType, cancellationToken: 
             let! ctx = ContextUtils.getContext ct
             try
                 use cmd = ctx.BuildCommand(query)
-                use! reader = cmd.ExecuteReaderAsync(cancellationToken)
+                use! reader = cmd.ExecuteReaderAsync(this.CancellationToken)
                 let readRow = Hydration.buildSelectExprReader reader exprInfo
 
                 let results = ResizeArray<'Selected>()
-                let! hasMore = reader.ReadAsync(cancellationToken)
+                let! hasMore = reader.ReadAsync(this.CancellationToken)
                 let mutable hasMore = hasMore
                 while hasMore do
                     let fields = readRow()
                     let result = exprInfo.CompiledMapper.Invoke(fields) :?> 'Selected
                     results.Add(result)
-                    let! hasMore' = reader.ReadAsync(cancellationToken)
+                    let! hasMore' = reader.ReadAsync(this.CancellationToken)
                     hasMore <- hasMore'
 
                 return results :> seq<'Selected> |> resultModifier
@@ -626,17 +631,17 @@ type SelectTaskBuilder<'Selected, 'Mapped> (ct: ContextType, cancellationToken: 
             let! ctx = ContextUtils.getContext ct
             try
                 use cmd = ctx.BuildCommand(query)
-                use! reader = cmd.ExecuteReaderAsync(cancellationToken)
+                use! reader = cmd.ExecuteReaderAsync(this.CancellationToken)
                 let readRow = Hydration.buildSelectExprReader reader exprInfo
 
                 let results = ResizeArray<'Mapped>()
-                let! hasMore = reader.ReadAsync(cancellationToken)
+                let! hasMore = reader.ReadAsync(this.CancellationToken)
                 let mutable hasMore = hasMore
                 while hasMore do
                     let fields = readRow()
                     let selected = exprInfo.CompiledMapper.Invoke(fields) :?> 'Selected
                     results.Add(this.MapFn.Value.Invoke(selected))
-                    let! hasMore' = reader.ReadAsync(cancellationToken)
+                    let! hasMore' = reader.ReadAsync(this.CancellationToken)
                     hasMore <- hasMore'
 
                 return results :> seq<'Mapped> |> resultModifier
@@ -710,7 +715,7 @@ type SelectTaskBuilder<'Selected, 'Mapped> (ct: ContextType, cancellationToken: 
     member this.Run(state: QuerySource<ResultModifier.Count<int>, Query>) =
         task {
             let! ctx = ContextUtils.getContext ct
-            try return! ctx.CountAsyncWithOptions (SelectQuery<int>(state.Query), cancellationToken) |> Async.AwaitTask
+            try return! ctx.CountAsyncWithOptions (SelectQuery<int>(state.Query), this.CancellationToken) |> Async.AwaitTask
             finally ContextUtils.disposeIfNotShared ct ctx
         }
 
@@ -724,7 +729,8 @@ type SelectAsyncBuilder<'Selected, 'Mapped> (ct: ContextType) =
             let! ctx = ContextUtils.getContext ct |> Async.AwaitTask
             try
                 use cmd = ctx.BuildCommand(query)
-                let! cancel = Async.CancellationToken
+                let! asyncCancel = Async.CancellationToken
+                let cancel = if this.CancellationToken <> CancellationToken.None then this.CancellationToken else asyncCancel
                 use! reader = cmd.ExecuteReaderAsync(cancel) |> Async.AwaitTask
                 let readEntity = Hydration.buildRowReader<'Selected> (reader :?> DbDataReader)
                 let results = ResizeArray<'Selected>()
@@ -746,7 +752,8 @@ type SelectAsyncBuilder<'Selected, 'Mapped> (ct: ContextType) =
             let! ctx = ContextUtils.getContext ct |> Async.AwaitTask
             try
                 use cmd = ctx.BuildCommand(query)
-                let! cancel = Async.CancellationToken
+                let! asyncCancel = Async.CancellationToken
+                let cancel = if this.CancellationToken <> CancellationToken.None then this.CancellationToken else asyncCancel
                 use! reader = cmd.ExecuteReaderAsync(cancel) |> Async.AwaitTask
                 let readEntity = Hydration.buildRowReader<'Selected> (reader :?> DbDataReader)
                 let results = ResizeArray<'Mapped>()
@@ -768,7 +775,8 @@ type SelectAsyncBuilder<'Selected, 'Mapped> (ct: ContextType) =
             let! ctx = ContextUtils.getContext ct |> Async.AwaitTask
             try
                 use cmd = ctx.BuildCommand(query)
-                let! cancel = Async.CancellationToken
+                let! asyncCancel = Async.CancellationToken
+                let cancel = if this.CancellationToken <> CancellationToken.None then this.CancellationToken else asyncCancel
                 use! reader = cmd.ExecuteReaderAsync(cancel) |> Async.AwaitTask
                 let readRow = Hydration.buildSelectExprReader (reader :?> DbDataReader) exprInfo
 
@@ -792,7 +800,8 @@ type SelectAsyncBuilder<'Selected, 'Mapped> (ct: ContextType) =
             let! ctx = ContextUtils.getContext ct |> Async.AwaitTask
             try
                 use cmd = ctx.BuildCommand(query)
-                let! cancel = Async.CancellationToken
+                let! asyncCancel = Async.CancellationToken
+                let cancel = if this.CancellationToken <> CancellationToken.None then this.CancellationToken else asyncCancel
                 use! reader = cmd.ExecuteReaderAsync(cancel) |> Async.AwaitTask
                 let readRow = Hydration.buildSelectExprReader (reader :?> DbDataReader) exprInfo
 
@@ -877,7 +886,8 @@ type SelectAsyncBuilder<'Selected, 'Mapped> (ct: ContextType) =
     member this.Run(state: QuerySource<ResultModifier.Count<int>, Query>) =
         async {
             let! ctx = ContextUtils.getContext ct |> Async.AwaitTask
-            let! cancel = Async.CancellationToken
+            let! asyncCancel = Async.CancellationToken
+            let cancel = if this.CancellationToken <> CancellationToken.None then this.CancellationToken else asyncCancel
             try return! ctx.CountAsyncWithOptions (SelectQuery<int>(state.Query), cancel) |> Async.AwaitTask
             finally ContextUtils.disposeIfNotShared ct ctx
         }
@@ -901,11 +911,4 @@ let inline selectTask< ^Selected, ^Mapped, ^Context
     let ct = ContextTypeResolver.resolve ctSource
     SelectTaskBuilder< ^Selected, ^Mapped>(ct)
 
-/// Builds a select query with a context source and CancellationToken - returns a Task query result
-let inline selectTaskCancellable< ^Selected, ^Mapped, ^Context
-    when (ContextTypeResolver.Resolver or ^Context) : (static member ($) : ContextTypeResolver.Resolver * ^Context -> ContextType)>
-    (ctSource: ^Context)
-    (cancellationToken: CancellationToken) =
-    let ct = ContextTypeResolver.resolve ctSource
-    SelectTaskBuilder< ^Selected, ^Mapped>(ct, cancellationToken)
 
