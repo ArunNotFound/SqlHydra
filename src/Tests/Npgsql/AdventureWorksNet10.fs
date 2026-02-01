@@ -3214,37 +3214,33 @@ module sales =
 
 
 type QueryContextFactory =
-    { CreateConnection: unit -> System.Data.Common.DbConnection
-      OpenContext: unit -> QueryContext
+    { OpenContext: unit -> QueryContext
       OpenContextAsync: unit -> System.Threading.Tasks.Task<QueryContext> }
 
     interface IQueryContextFactory with
-        member this.CreateConnection() = this.CreateConnection()
-        member this.OpenContext() = this.OpenContext()
         member this.OpenContextAsync() = this.OpenContextAsync()
 
     static member Create(connectionString: string, ?sqlLogger) =
+        QueryContextFactory.Create(Npgsql.NpgsqlDataSource.Create(connectionString), ?sqlLogger = sqlLogger)
+
+    static member Create(dataSource: Npgsql.NpgsqlDataSource, ?sqlLogger) =
         let compiler = SqlKata.Compilers.PostgresCompiler()
 
-        let createConn () : System.Data.Common.DbConnection =
-            new Npgsql.NpgsqlConnection(connectionString)
+        let createConn () : System.Data.Common.DbConnection = dataSource.OpenConnection()
 
         let openContext () =
             let conn = createConn ()
-            conn.Open()
             let ctx = new QueryContext(conn, compiler)
             sqlLogger |> Option.iter (fun logger -> ctx.Logger <- logger)
             ctx
 
         let openContextAsync () =
             task {
-                let conn = createConn ()
-                do! conn.OpenAsync()
+                let! conn = dataSource.OpenConnectionAsync()
                 let ctx = new QueryContext(conn, compiler)
                 sqlLogger |> Option.iter (fun logger -> ctx.Logger <- logger)
                 return ctx
             }
 
-        { CreateConnection = createConn
-          OpenContext = openContext
+        { OpenContext = openContext
           OpenContextAsync = openContextAsync }

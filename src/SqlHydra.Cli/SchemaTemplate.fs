@@ -142,16 +142,51 @@ namespace {{cfg.Namespace}}
     if cfg.ProviderDbTypeAttributes then
         let compiler = mkCompiler provider.Type
         let connectionType = mkConnectionType provider.Type
-        $"""
+
+        if provider.Type = ProviderType.Npgsql then
+            $"""
 type QueryContextFactory =
     {{
-        CreateConnection: unit -> System.Data.Common.DbConnection
         OpenContext: unit -> QueryContext
         OpenContextAsync: unit -> System.Threading.Tasks.Task<QueryContext>
     }}
     interface IQueryContextFactory with
-        member this.CreateConnection() = this.CreateConnection()
-        member this.OpenContext() = this.OpenContext()
+        member this.OpenContextAsync() = this.OpenContextAsync()
+    static member Create(connectionString: string, ?sqlLogger) =
+        QueryContextFactory.Create(Npgsql.NpgsqlDataSource.Create(connectionString), ?sqlLogger = sqlLogger)
+    static member Create(dataSource: Npgsql.NpgsqlDataSource, ?sqlLogger) =
+        let compiler = {compiler}
+
+        let createConn () : System.Data.Common.DbConnection =
+            dataSource.OpenConnection()
+
+        let openContext () =
+            let conn = createConn ()
+            let ctx = new QueryContext(conn, compiler)
+            sqlLogger |> Option.iter (fun logger -> ctx.Logger <- logger)
+            ctx
+
+        let openContextAsync () =
+            task {{
+                let! conn = dataSource.OpenConnectionAsync()
+                let ctx = new QueryContext(conn, compiler)
+                sqlLogger |> Option.iter (fun logger -> ctx.Logger <- logger)
+                return ctx
+            }}
+
+        {{
+            OpenContext = openContext
+            OpenContextAsync = openContextAsync
+        }}
+    """
+        else
+            $"""
+type QueryContextFactory =
+    {{
+        OpenContext: unit -> QueryContext
+        OpenContextAsync: unit -> System.Threading.Tasks.Task<QueryContext>
+    }}
+    interface IQueryContextFactory with
         member this.OpenContextAsync() = this.OpenContextAsync()
     static member Create(connectionString: string, ?sqlLogger) =
         let compiler = {compiler}
@@ -176,7 +211,6 @@ type QueryContextFactory =
             }}
 
         {{
-            CreateConnection = createConn
             OpenContext = openContext
             OpenContextAsync = openContextAsync
         }}

@@ -6,7 +6,7 @@ open SqlHydra.Query.NpgsqlExtensions
 open type SqlFn
 open NUnit.Framework
 open System.Threading.Tasks
-open DB
+open Npgsql.DB
 #if NET8_0
 open Npgsql.AdventureWorksNet8
 #endif
@@ -17,20 +17,18 @@ open Npgsql.AdventureWorksNet9
 open Npgsql.AdventureWorksNet10
 #endif
 
-let dataSource = 
-    let builder = NpgsqlDataSourceBuilder(connectionString)
-    builder.MapEnum<ext.mood>("ext.mood") |> ignore    
-    builder.Build()
-
-let openContext() = 
-    let compiler = SqlKata.Compilers.PostgresCompiler()        
-    let conn = dataSource.OpenConnection()
-    new QueryContext(conn, compiler)
+let db = 
+    let dataSource = 
+        let builder = Npgsql.NpgsqlDataSourceBuilder(connectionString)
+        builder.MapEnum<ext.mood>("ext.mood") |> ignore    
+        builder.Build()
+    
+    QueryContextFactory.Create(dataSource, sqlLogger = printf "SQL: %O")
 
 [<Test>]
 let ``Where City Contains``() = task {
     let! addresses =
-        selectTask openContext {
+        selectTask db {
             for a in person.address do
             where (a.city |=| [ "Seattle"; "Santa Cruz" ])
         }
@@ -42,7 +40,7 @@ let ``Where City Contains``() = task {
 [<Test>]
 let ``Select city Column Where city Starts with S``() = task {
     let! cities =
-        selectTask openContext {
+        selectTask db {
             for a in person.address do
             where (a.city =% "S%")
             select a.city
@@ -55,7 +53,7 @@ let ``Select city Column Where city Starts with S``() = task {
 [<Test>]
 let ``Inner Join Orders-Details``() = task {
     let! results =
-        selectTask openContext {
+        selectTask db {
             for o in sales.salesorderheader do
             join d in sales.salesorderdetail on (o.salesorderid = d.salesorderid)
             where o.onlineorderflag
@@ -68,7 +66,7 @@ let ``Inner Join Orders-Details``() = task {
 [<Test>]
 let ``Product with Category name``() = task {
     let! rows =
-        selectTask openContext {
+        selectTask db {
             for p in production.product do
             join sc in production.productsubcategory on (p.productsubcategoryid = Some sc.productsubcategoryid)
             join c in production.productcategory on (sc.productcategoryid = c.productcategoryid)
@@ -82,7 +80,7 @@ let ``Product with Category name``() = task {
 [<Test>]
 let ``Select Column Aggregates From Product IDs 1-3``() = task {
     let! aggregates =
-        selectTask openContext {
+        selectTask db {
             for p in production.product do
             where (p.productsubcategoryid <> None)
             groupBy p.productsubcategoryid
@@ -118,7 +116,7 @@ let ``Aggregate Subquery One``() = task {
         }
 
     let! productsWithHigherThanAvgPrice =
-        selectTask openContext {
+        selectTask db {
             for p in production.product do
             where (p.listprice > subqueryOne avgListPrice)
             orderByDescending p.listprice
@@ -134,7 +132,7 @@ let ``Aggregate Subquery One``() = task {
 [<Test>]
 let ``Select Column Aggregates``() = task {
     let! aggregates =
-        selectTask openContext {
+        selectTask db {
             for p in production.product do
             where (p.productsubcategoryid <> None)
             groupBy p.productsubcategoryid
@@ -148,7 +146,7 @@ let ``Select Column Aggregates``() = task {
 [<Test>]
 let ``Sorted Aggregates - Top 5 categories with highest avg price products``() = task {
     let! aggregates =
-        selectTask openContext {
+        selectTask db {
             for p in production.product do
             where (p.productsubcategoryid <> None)
             groupBy p.productsubcategoryid
@@ -173,7 +171,7 @@ let ``Where subqueryMany``() = task {
         }
 
     let! top5Categories =
-        selectTask openContext {
+        selectTask db {
             for c in production.productcategory do
             where (Some c.productcategoryid |=| subqueryMany top5CategoryIdsWithHighestAvgPrices)
             select c.name
@@ -191,7 +189,7 @@ let ``Where subqueryOne``() = task {
         }
 
     let! productsWithAboveAveragePrice =
-        selectTask openContext {
+        selectTask db {
             for p in production.product do
             where (p.listprice > subqueryOne avgListPrice)
             select (p.name, p.listprice)
@@ -203,7 +201,7 @@ let ``Where subqueryOne``() = task {
 [<Test>]
 let ``Select Columns with Option``() = task {
     let! values =
-        selectTask openContext {
+        selectTask db {
             for p in production.product do
             where (p.productsubcategoryid <> None)
             select (p.productsubcategoryid, p.listprice)
@@ -215,10 +213,10 @@ let ``Select Columns with Option``() = task {
 
 [<Test>]
 let ``Insert Currency``() = task {
-    use ctx = openContext()
+    use! shared = db.OpenContextAsync()
 
     let! results =
-        insert {
+        insertTask shared {
             for c in sales.currency do
             entity 
                 {
@@ -227,12 +225,11 @@ let ``Insert Currency``() = task {
                     sales.currency.modifieddate = System.DateTime.Today
                 }
         }
-        |> ctx.InsertAsync
 
     results =! 1
 
     let! btc =
-        selectTask ctx {
+        selectTask shared {
             for c in sales.currency do
             where (c.currencycode = "BTC")
         }
@@ -242,20 +239,19 @@ let ``Insert Currency``() = task {
 
 [<Test>]
 let ``Update Currency``() = task {
-    use ctx = openContext()
+    use! shared = db.OpenContextAsync()
 
     let! results = 
-        update {
+        updateTask shared {
             for c in sales.currency do
             set c.name "BitCoinzz"
             where (c.currencycode = "BTC")
         }
-        |> ctx.UpdateAsync
 
     results >! 0
 
     let! btc =
-        selectTask ctx {
+        selectTask shared {
             for c in sales.currency do
             where (c.name = "BitCoinzz")
         }
@@ -265,17 +261,16 @@ let ``Update Currency``() = task {
 
 [<Test>]
 let ``Delete Currency``() = task {
-    use ctx = openContext()
+    use! shared = db.OpenContextAsync()
 
     let! _ = 
-        delete {
+        deleteAsync shared {
             for c in sales.currency do
             where (c.currencycode = "BTC")
         }
-        |> ctx.DeleteAsync
 
     let! btc =
-        selectTask ctx {
+        selectTask shared {
             for c in sales.currency do
             where (c.currencycode = "BTC")
         }
@@ -285,10 +280,10 @@ let ``Delete Currency``() = task {
 
 [<Test>]
 let ``Insert Network``() = task {
-    use ctx = openContext()
+    use! shared = db.OpenContextAsync()
 
     let! results = 
-        insert {
+        insertAsync shared {
             for c in network_sample.network_addresses do
             entity 
                 {
@@ -300,12 +295,11 @@ let ``Insert Network``() = task {
                 }
             excludeColumn c.id
         }
-        |> ctx.InsertAsync
 
     results =! 1
 
     let! ipAddr =
-        selectTask ctx {
+        selectTask shared {
             for c in network_sample.network_addresses do
             where (c.net_inet = System.Net.IPAddress.Parse "127.0.0.2")
         }
@@ -315,21 +309,21 @@ let ``Insert Network``() = task {
 
 [<Test; Ignore "Ignore">]
 let ``Insert and Get Id``() = task {
-    use ctx = openContext()
+    use! shared = db.OpenContextAsync()
             
-    ctx.BeginTransaction()
+    shared.BeginTransaction()
     let! deletedCount =
-        delete {
+        deleteAsync shared {
             for r in production.productreview do
             where (r.emailaddress = "gfisher@askjeeves.com")
         }
-        |> ctx.DeleteAsync
-    ctx.CommitTransaction()
 
-    ctx.BeginTransaction()
+    shared.CommitTransaction()
+
+    shared.BeginTransaction()
 
     let! prodReviewId = 
-        insertTask ctx {
+        insertTask shared {
             for r in production.productreview do
             entity 
                 {
@@ -346,7 +340,7 @@ let ``Insert and Get Id``() = task {
         }
 
     let! review =
-        selectTask ctx {
+        selectTask shared {
             for r in production.productreview do
             where (r.reviewername = "Gary Fisher")
             tryHead
@@ -359,29 +353,28 @@ let ``Insert and Get Id``() = task {
         failwith "Expected to query a review row."
 
     let! deletedCount = 
-        delete {
+        deleteAsync shared {
             for r in production.productreview do
             where (r.productreviewid = prodReviewId)
         }
-        |> ctx.DeleteAsync
 
     Assert.AreEqual(deletedCount, 1, "Expected exactly one review to be deleted")
 
     let! reviews =
-        selectTask ctx {
+        selectTask shared {
             for r in production.productreview do
             where (r.reviewername = "Gary Fisher")
         }
 
     Assert.AreEqual(reviews |> Seq.length, 0, "Expected no reviews to be queryable")
-    ctx.CommitTransaction()
+    shared.CommitTransaction()
 }
 
 [<Test>]
 let ``Multiple Inserts``() = task {
-    use ctx = openContext()
+    use! shared = db.OpenContextAsync()
 
-    ctx.BeginTransaction()
+    shared.BeginTransaction()
 
     let currencies = 
         [ 0 .. 2 ] 
@@ -397,16 +390,15 @@ let ``Multiple Inserts``() = task {
     match currencies with
     | Some currencies ->
         let! rowsInserted = 
-            insert {
+            insertAsync shared {
                 into sales.currency
                 entities currencies
             }
-            |> ctx.InsertAsync
 
         Assert.AreEqual(rowsInserted, 3, "Expected 3 rows to be inserted")
 
         let! results =
-            selectTask ctx {
+            selectTask shared {
                 for c in sales.currency do
                 where (c.currencycode =% "BC%")
                 orderBy c.currencycode
@@ -418,14 +410,14 @@ let ``Multiple Inserts``() = task {
         codes =! [ "BC0"; "BC1"; "BC2" ]
     | None -> ()
 
-    ctx.RollbackTransaction()
+    shared.RollbackTransaction()
 }
 
 [<Test>]
 let ``Distinct Test``() = task {
-    use ctx = openContext()
+    use! shared = db.OpenContextAsync()
 
-    ctx.BeginTransaction()
+    shared.BeginTransaction()
 
     let currencies = 
         [ 0 .. 2 ] 
@@ -441,7 +433,7 @@ let ``Distinct Test``() = task {
     match currencies with
     | Some currencies ->
         let! rowsInserted = 
-            insertTask ctx {
+            insertTask shared {
                 for e in sales.currency do
                 entities currencies
             }
@@ -449,14 +441,14 @@ let ``Distinct Test``() = task {
         Assert.AreEqual(rowsInserted, 3, "Expected 3 rows to be inserted")
 
         let! results =
-            selectTask ctx {
+            selectTask shared {
                 for c in sales.currency do
                 where (c.currencycode =% "BC%")
                 select c.name
             }
 
         let! distinctResults =
-            selectTask ctx {
+            selectTask shared {
                 for c in sales.currency do
                 where (c.currencycode =% "BC%")
                 select c.name
@@ -468,18 +460,18 @@ let ``Distinct Test``() = task {
     | None -> 
         ()
 
-    ctx.RollbackTransaction()
+    shared.RollbackTransaction()
 }
 
 [<Test>]
 let ``Insert, Update and Read npgsql provider specific db fields``() = task {
-    use ctx = openContext ()
+    use! shared = db.OpenContextAsync()
             
     let expectJsonEqual (dbValue: string) (jsonValue: string) err = 
         Assert.AreEqual(dbValue.Replace(" ", ""), jsonValue, err)
                 
     let getRowById id =
-        selectTask ctx {
+        selectTask shared {
             for e in ext.jsonsupport do
             select e
             where (e.id = id)
@@ -495,12 +487,11 @@ let ``Insert, Update and Read npgsql provider specific db fields``() = task {
         }
                 
     let! insertedRowId = 
-        insert {
+        insertAsync shared {
             for e in ext.jsonsupport do
             entity entity'
             getId e.id
         }
-        |> ctx.InsertAsync
                   
     let! selectedRows = getRowById insertedRowId
     match selectedRows |> Seq.tryHead with
@@ -513,13 +504,12 @@ let ``Insert, Update and Read npgsql provider specific db fields``() = task {
     // Simple update of one entity
     let updatedJsonValue = """{"name":"test_2"}"""
     let! updatedRows =
-        update {
-                for e in ext.jsonsupport do
-                set e.json_field updatedJsonValue
-                set e.jsonb_field updatedJsonValue
-                where (e.id = insertedRowId)
-            }
-            |> ctx.UpdateAsync
+        updateTask shared {
+            for e in ext.jsonsupport do
+            set e.json_field updatedJsonValue
+            set e.jsonb_field updatedJsonValue
+            where (e.id = insertedRowId)
+        }
         
     Assert.AreEqual(updatedRows, 1, "Expected 1 row to be updated")
             
@@ -537,11 +527,10 @@ let ``Insert, Update and Read npgsql provider specific db fields``() = task {
     | Some entities' ->
         // Insert of multiple entities
         let! insertedNumberOfRows = 
-            insert {
+            insertAsync shared {
                 for e in ext.jsonsupport do
                 entities entities'
             }
-            |> ctx.InsertAsync
             
         Assert.AreEqual(insertedNumberOfRows, 2, "Failed insert multiple entities")
     | None -> 
@@ -550,16 +539,16 @@ let ``Insert, Update and Read npgsql provider specific db fields``() = task {
 
 [<Test>]
 let ``Enum Tests``() = task {
-    use ctx = openContext ()
+    use! shared = db.OpenContextAsync()
 
     let! deleteResults =
-        deleteTask ctx {
+        deleteTask shared {
             for p in ext.person do
             deleteAll
         }
 
     let! insertResults = 
-        insertTask ctx {
+        insertTask shared {
             into ext.person
             entity (
                 { 
@@ -572,14 +561,14 @@ let ``Enum Tests``() = task {
     Assert.IsTrue(insertResults > 0, "Expected insert results > 0")
 
     let! query1Results = 
-        selectTask ctx {
+        selectTask shared {
             for p in ext.person do
             select p
             toList
         } 
 
     let! updateResults = 
-        updateTask ctx {
+        updateTask shared {
             for p in ext.person do
             set p.currentmood ext.mood.happy
             where (p.currentmood = ext.mood.ok)
@@ -588,7 +577,7 @@ let ``Enum Tests``() = task {
     Assert.IsTrue(updateResults > 0, "Expected update results > 0")
 
     let! query2Results = 
-        selectTask ctx {
+        selectTask shared {
             for p in ext.person do
             select p
             toList
@@ -599,11 +588,11 @@ let ``Enum Tests``() = task {
 
 [<Test>]
 let ``OnConflictDoUpdate``() = task {
-    use ctx = openContext()
-    ctx.BeginTransaction()
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
 
     let upsertCurrency currency = 
-        insertTask ctx {
+        insertTask shared {
             for c in sales.currency do
             entity currency
             onConflictDoUpdate c.currencycode (c.name, c.modifieddate)
@@ -611,7 +600,7 @@ let ``OnConflictDoUpdate``() = task {
 
     let queryCurrency code = task {
         let! results =
-            selectTask ctx {
+            selectTask shared {
                 for c in sales.currency do
                 where (c.currencycode = code)
             }
@@ -633,26 +622,25 @@ let ``OnConflictDoUpdate``() = task {
     let! query2 = queryCurrency "NEW"
     query2 =! editedCurrency
 
-    ctx.RollbackTransaction()
+    shared.RollbackTransaction()
 }
 
 [<Test>]
 let ``OnConflictDoNothing``() = task {
-    use ctx = openContext()
-    ctx.BeginTransaction()
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
 
     let tryInsertCurrency currency = 
-        insert {
+        insertTask shared {
             for c in sales.currency do
             entity currency
             onConflictDoNothing c.currencycode
-        }   
-        |> ctx.Insert
-        |> ignore
+        } : Task
+        
             
     let queryCurrency code = task {
         let! results =
-            selectTask ctx {
+            selectTask shared {
                 for c in sales.currency do
                 where (c.currencycode = code)
             }
@@ -664,24 +652,22 @@ let ``OnConflictDoNothing``() = task {
         ; sales.currency.name = "New Currency"
         ; sales.currency.modifieddate = System.DateTime.Today }
 
-    tryInsertCurrency newCurrency
+    do! tryInsertCurrency newCurrency
     let! query1 = queryCurrency "NEW"
     query1 =! newCurrency
 
     let editedCurrency = { query1 with name = "Edited Currency" }
-    tryInsertCurrency editedCurrency
+    do! tryInsertCurrency editedCurrency
     let! query2 = queryCurrency "NEW"
     query2 =! newCurrency
 
-    ctx.RollbackTransaction()
+    shared.RollbackTransaction()
 }
 
 [<Test>]
 let ``Query Employee Record with DateOnly``() = task {
-    use ctx = openContext()
-            
     let! employees =
-        selectTask ctx {
+        selectTask db {
             for e in humanresources.employee do
             select e
         }
@@ -691,10 +677,8 @@ let ``Query Employee Record with DateOnly``() = task {
 
 [<Test>]
 let ``Query Employee Column with DateOnly``() = task {
-    use ctx = openContext()
-            
     let! employeeBirthDates =
-        selectTask ctx {
+        selectTask db {
             for e in humanresources.employee do
             select e.birthdate
         }
@@ -704,8 +688,8 @@ let ``Query Employee Column with DateOnly``() = task {
 
 [<Test>]
 let ``Test Array Columns``() = task {
-    use ctx = openContext()
-    ctx.BeginTransaction()
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
 
     let row = 
         { 
@@ -715,7 +699,7 @@ let ``Test Array Columns``() = task {
         }
 
     let! insertResults = 
-        insertTask ctx {
+        insertTask shared {
             into ext.arrays
             entity row
         }
@@ -724,7 +708,7 @@ let ``Test Array Columns``() = task {
 
             
     let! query1Result = 
-        selectTask ctx {
+        selectTask shared {
             for r in ext.arrays do
             select r
             tryHead
@@ -733,7 +717,7 @@ let ``Test Array Columns``() = task {
     Assert.AreEqual(query1Result, Some row, "Expected query result to match inserted row.")
 
     let! query2Result = 
-        selectTask ctx {
+        selectTask shared {
             for r in ext.arrays do
             select (r.integer_array, r.text_array)
             tryHead
@@ -741,16 +725,16 @@ let ``Test Array Columns``() = task {
 
     Assert.AreEqual(query2Result, Some (row.integer_array, row.text_array), "Expected to query individually selected array columns.")
 
-    ctx.RollbackTransaction()
+    shared.RollbackTransaction()
 }
 
 [<Test>]
 let ``Update Employee DateOnly``() = task {
-    use ctx = openContext()
-    ctx.BeginTransaction()
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
             
     let! employees =
-        selectTask ctx {
+        selectTask shared {
             for e in humanresources.employee do
             select e
         }
@@ -761,7 +745,7 @@ let ``Update Employee DateOnly``() = task {
     let birthDate = System.DateOnly(1980, 1, 1)
 
     let! result = 
-        updateTask ctx {
+        updateTask shared {
             for e in humanresources.employee do
             set e.birthdate birthDate
             where (e.businessentityid = emp.businessentityid)
@@ -770,7 +754,7 @@ let ``Update Employee DateOnly``() = task {
     result =! 1
 
     let! refreshedEmp = 
-        selectTask ctx {
+        selectTask shared {
             for e in humanresources.employee do
             where (e.businessentityid = emp.businessentityid)                    
             tryHead
@@ -782,15 +766,13 @@ let ``Update Employee DateOnly``() = task {
             
     actualBirthDate =! Some birthDate
 
-    ctx.RollbackTransaction()
+    shared.RollbackTransaction()
 }
 
 [<Test>]
 let ``SqlFn - PostgreSQL functions smoke test``() = task {
-    use ctx = openContext()
-
     let! results =
-        selectTask ctx {
+        selectTask db {
             for p in person.person do
             where (p.firstname = "Ken")
             select (p.firstname, char_length p.firstname, upper p.firstname, coalesce(p.middlename, "N/A"))

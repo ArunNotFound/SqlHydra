@@ -127,13 +127,10 @@ module OT =
 
 
 type QueryContextFactory =
-    { CreateConnection: unit -> System.Data.Common.DbConnection
-      OpenContext: unit -> QueryContext
+    { OpenContext: unit -> QueryContext
       OpenContextAsync: unit -> System.Threading.Tasks.Task<QueryContext> }
 
     interface IQueryContextFactory with
-        member this.CreateConnection() = this.CreateConnection()
-        member this.OpenContext() = this.OpenContext()
         member this.OpenContextAsync() = this.OpenContextAsync()
 
     static member Create(connectionString: string, ?sqlLogger) =
@@ -158,6 +155,5 @@ type QueryContextFactory =
                 return ctx
             }
 
-        { CreateConnection = createConn
-          OpenContext = openContext
+        { OpenContext = openContext
           OpenContextAsync = openContextAsync }
