@@ -147,10 +147,16 @@ let insert<'Inserted, 'InsertReturn> =
     InsertBuilder<'Inserted, 'InsertReturn>()
 
 /// Builds an insert query that returns an Async result
-let insertAsync<'Inserted, 'InsertReturn> ct = 
-    InsertAsyncBuilder<'Inserted, 'InsertReturn>(ct)
+let inline insertAsync< ^Inserted, ^InsertReturn, ^Context
+    when (ContextTypeResolver.Resolver or ^Context) : (static member ($) : ContextTypeResolver.Resolver * ^Context -> ContextType)>
+    (ctSource: ^Context) =
+    let ct = ContextTypeResolver.resolve ctSource
+    InsertAsyncBuilder< ^Inserted, ^InsertReturn>(ct)
 
 /// Builds an insert query that returns a Task result
-let insertTask<'Inserted, 'InsertReturn> ct = 
-    InsertTaskBuilder<'Inserted, 'InsertReturn>(ct)
+let inline insertTask< ^Inserted, ^InsertReturn, ^Context
+    when (ContextTypeResolver.Resolver or ^Context) : (static member ($) : ContextTypeResolver.Resolver * ^Context -> ContextType)>
+    (ctSource: ^Context) =
+    let ct = ContextTypeResolver.resolve ctSource
+    InsertTaskBuilder< ^Inserted, ^InsertReturn>(ct)
     

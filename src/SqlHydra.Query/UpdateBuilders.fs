@@ -144,11 +144,17 @@ let update<'Updated, 'UpdateReturn> =
     UpdateBuilder<'Updated, 'UpdateReturn>()
 
 /// Builds an update query that returns an Async result
-let updateAsync<'Updated, 'UpdateReturn> ct = 
-    UpdateAsyncBuilder<'Updated, 'UpdateReturn>(ct)
+let inline updateAsync< ^Updated, ^UpdateReturn, ^Context
+    when (ContextTypeResolver.Resolver or ^Context) : (static member ($) : ContextTypeResolver.Resolver * ^Context -> ContextType)>
+    (ctSource: ^Context) =
+    let ct = ContextTypeResolver.resolve ctSource
+    UpdateAsyncBuilder< ^Updated, ^UpdateReturn>(ct)
 
 /// Builds an update query that returns a Task result
-let updateTask<'Updated, 'UpdateReturn> ct = 
-    UpdateTaskBuilder<'Updated, 'UpdateReturn>(ct)
+let inline updateTask< ^Updated, ^UpdateReturn, ^Context
+    when (ContextTypeResolver.Resolver or ^Context) : (static member ($) : ContextTypeResolver.Resolver * ^Context -> ContextType)>
+    (ctSource: ^Context) =
+    let ct = ContextTypeResolver.resolve ctSource
+    UpdateTaskBuilder< ^Updated, ^UpdateReturn>(ct)
     
     

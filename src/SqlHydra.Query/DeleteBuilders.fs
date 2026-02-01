@@ -95,11 +95,17 @@ let delete<'Deleted> =
     DeleteBuilder<'Deleted>()
 
 /// Builds and returns a delete query that returns an Async result
-let deleteAsync<'Deleted> ct = 
-    DeleteAsyncBuilder<'Deleted>(ct)
+let inline deleteAsync< ^Deleted, ^Context
+    when (ContextTypeResolver.Resolver or ^Context) : (static member ($) : ContextTypeResolver.Resolver * ^Context -> ContextType)>
+    (ctSource: ^Context) =
+    let ct = ContextTypeResolver.resolve ctSource
+    DeleteAsyncBuilder< ^Deleted>(ct)
 
 /// Builds and returns a delete query that returns a Task result
-let deleteTask<'Deleted> ct = 
-    DeleteTaskBuilder<'Deleted>(ct)
+let inline deleteTask< ^Deleted, ^Context
+    when (ContextTypeResolver.Resolver or ^Context) : (static member ($) : ContextTypeResolver.Resolver * ^Context -> ContextType)>
+    (ctSource: ^Context) =
+    let ct = ContextTypeResolver.resolve ctSource
+    DeleteTaskBuilder< ^Deleted>(ct)
     
     
