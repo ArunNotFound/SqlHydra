@@ -36,18 +36,14 @@ let stubbedErrorLog =
 
 [<Test>]
 let ``Select Column Aggregates From Product IDs 1-3``() = task {
-    use ctx = openContext()
-
-    let query =
-        select {
+    let! aggregates =
+        selectTask openContext {
             for p in Production.Product do
             where (isNotNullValue p.ProductSubcategoryID)
             groupBy p.ProductSubcategoryID
             where (p.ProductSubcategoryID.Value |=| [ 1; 2; 3 ])
             select (p.ProductSubcategoryID, minBy p.ListPrice, maxBy p.ListPrice, avgBy p.ListPrice, countBy p.ListPrice, sumBy p.ListPrice)
         }
-
-    let! aggregates = query |> ctx.ReadAsync HydraReader.Read
 
     gt0 aggregates
             
@@ -63,45 +59,36 @@ let ``Select Column Aggregates From Product IDs 1-3``() = task {
 
 [<Test>]
 let ``Select Column Aggregates``() = task {
-    use ctx = openContext()
-
-    let! aggregates = 
-        select {
+    let! aggregates =
+        selectTask openContext {
             for p in Production.Product do
             where (isNotNullValue p.ProductSubcategoryID)
             groupBy p.ProductSubcategoryID
             having (minBy p.ListPrice > 50M && maxBy p.ListPrice < 1000M)
             select (p.ProductSubcategoryID, minBy p.ListPrice, maxBy p.ListPrice)
         }
-        |> ctx.ReadAsync HydraReader.Read
 
     gt0 aggregates
 }
 
 [<Test>]
 let ``Sorted Aggregates - Top 5 categories with highest avg price products``() = task {
-    use ctx = openContext()
-
-    let query = 
-        select {
-                for p in Production.Product do
-                where (p.ProductSubcategoryID.HasValue = true)
-                groupBy p.ProductSubcategoryID
-                orderByDescending (avgBy p.ListPrice)
-                select (p.ProductSubcategoryID, avgBy p.ListPrice)
-                take 5
+    let! aggregates =
+        selectTask openContext {
+            for p in Production.Product do
+            where (p.ProductSubcategoryID.HasValue = true)
+            groupBy p.ProductSubcategoryID
+            orderByDescending (avgBy p.ListPrice)
+            select (p.ProductSubcategoryID, avgBy p.ListPrice)
+            take 5
         }
-
-    let! aggregates = query |> ctx.ReadAsync HydraReader.Read
 
     gt0 aggregates
 }
 
 [<Test>]
 let ``Where subqueryMany``() = task {
-    use ctx = openContext()
-
-    let top5CategoryIdsWithHighestAvgPrices = 
+    let top5CategoryIdsWithHighestAvgPrices =
         select {
             for p in Production.Product do
             where (isNotNullValue p.ProductSubcategoryID)
@@ -112,27 +99,23 @@ let ``Where subqueryMany``() = task {
         }
 
     let! top5Categories =
-        select {
+        selectTask openContext {
             for c in Production.ProductCategory do
             where (Nullable c.ProductCategoryID |=| subqueryMany top5CategoryIdsWithHighestAvgPrices)
             select c.Name
         }
-        |> ctx.ReadAsync HydraReader.Read
 
     gt0 top5Categories
 }
 
 [<Test>]
 let ``Select Columns with Option``() = task {
-    use ctx = openContext()
-
-    let! values = 
-        select {
+    let! values =
+        selectTask openContext {
             for p in Production.Product do
             where (p.ProductSubcategoryID.HasValue)
             select (p.ProductSubcategoryID, p.ListPrice)
         }
-        |> ctx.ReadAsync HydraReader.Read
 
     gt0 values
     Assert.IsTrue(values |> Seq.forall (fun (catId, price) -> catId.HasValue), "Expected subcategories to all have a value.")
@@ -197,7 +180,7 @@ let ``Update Set Individual Fields``() = task {
     use ctx = openContext()
         
     let! row = 
-        selectTask HydraReader.Read ctx {
+        selectTask ctx {
             for e in dbo.ErrorLog do
             head
         }
@@ -220,7 +203,7 @@ let ``UpdateAsync Set Individual Fields``() = task {
     use ctx = openContext()
 
     let! row = 
-        selectTask HydraReader.Read ctx {
+        selectTask ctx {
             for e in dbo.ErrorLog do
             head
         }
@@ -241,7 +224,7 @@ let ``Update Entity``() = task {
     use ctx = openContext()
         
     let! row = 
-        selectTask HydraReader.Read ctx {
+        selectTask ctx {
             for e in dbo.ErrorLog do
             head
         }

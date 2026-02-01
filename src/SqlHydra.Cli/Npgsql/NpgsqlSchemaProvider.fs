@@ -276,7 +276,6 @@ let getSchema (cfg: Config, isLegacy: bool) : Schema =
                                     then $"{enum.Schema}.{enum.Name}"       // Enum lives in a different schema/module
                                     else enum.Name                          // Enum lives in this module
                                 TypeMapping.DbType = DbType.Object
-                                TypeMapping.ReaderMethod = "GetFieldValue"  // Requires registration with Npgsql via `MapEnum`
                                 TypeMapping.ProviderDbType = None
                             }
                         Column.IsPK = pks.Contains(col.TableSchema, col.TableName, col.ColumnName)
@@ -305,8 +304,7 @@ let getSchema (cfg: Config, isLegacy: bool) : Schema =
         )
         |> Seq.toList
 
-    { 
+    {
         Tables = tables @ matViews
         Enums = enums
-        PrimitiveTypeReaders = NpgsqlDataTypes.primitiveTypeReaders isLegacy
     }

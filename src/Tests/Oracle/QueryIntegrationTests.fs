@@ -18,8 +18,6 @@ open Oracle.AdventureWorksNet9
 open Oracle.AdventureWorksNet10
 #endif
 
-open HydraBuilders
-
 let openContext() = 
     let compiler = SqlKata.Compilers.OracleCompiler()
     let conn = new OracleConnection(connectionString)
@@ -28,14 +26,11 @@ let openContext() =
 
 [<Test>]
 let ``Where Name Contains``() = task {
-    use ctx = openContext()
-    
-    let addresses =
-        select {
+    let! addresses =
+        selectTask openContext {
             for c in OT.CUSTOMERS do
             where (c.NAME |=| [ "ABC Corp"; "XYZ Ltd" ])
         }
-        |> ctx.Read HydraReader.Read
 
     gt0 addresses
     Assert.IsTrue(addresses |> Seq.forall (fun a -> a.NAME = "ABC Corp" || a.NAME = "XYZ Ltd"), "Expected only 'ABC Corp' or 'XYZ Ltd'.")
@@ -43,15 +38,12 @@ let ``Where Name Contains``() = task {
 
 [<Test>]
 let ``Select Address Column Where Address Contains USA``() = task {
-    use ctx = openContext()
-
-    let cities =
-        select {
+    let! cities =
+        selectTask openContext {
             for c in OT.CUSTOMERS do
             where (c.ADDRESS =% "%USA")
             select c.ADDRESS
         }
-        |> ctx.Read HydraReader.Read
 
     gt0 cities
     Assert.IsTrue(cities |> Seq.choose id |> Seq.forall (fun city -> city.Contains "USA"), "Expected all cities to contain 'USA'.")
@@ -152,10 +144,8 @@ let ``Select Column Aggregates``() = task {
 // ERROR: ORA-00904: "P"."LIST_PRICE": invalid identifier
 [<Test; Ignore "Ignore">]
 let ``Sorted Aggregates - Top 5 categories with highest avg price products``() = task {
-    use ctx = openContext()
-
-    let! aggregates = 
-        select {
+    let! aggregates =
+        selectTask openContext {
             for p in OT.PRODUCTS do
             where (p.LIST_PRICE <> None)
             groupBy p.CATEGORY_ID
@@ -163,7 +153,6 @@ let ``Sorted Aggregates - Top 5 categories with highest avg price products``() =
             select (p.CATEGORY_ID, avgBy p.LIST_PRICE.Value)
             take 5
         }
-        |> ctx.ReadAsync HydraReader.Read
 
     gt0 aggregates
 }
@@ -172,9 +161,7 @@ let ``Sorted Aggregates - Top 5 categories with highest avg price products``() =
 // ERROR: ORA-00904: "P"."LIST_PRICE": invalid identifier
 [<Test; Ignore "Ignore">]
 let ``Where subqueryMany``() = task {
-    use ctx = openContext()
-
-    let top5CategoryIdsWithHighestAvgPrices = 
+    let top5CategoryIdsWithHighestAvgPrices =
         select {
             for p in OT.PRODUCTS do
             where (p.LIST_PRICE <> None)
@@ -185,12 +172,11 @@ let ``Where subqueryMany``() = task {
         }
 
     let! top5Categories =
-        select {
+        selectTask openContext {
             for c in OT.PRODUCT_CATEGORIES do
             where (c.CATEGORY_ID |=| subqueryMany top5CategoryIdsWithHighestAvgPrices)
             select c.CATEGORY_NAME
         }
-        |> ctx.ReadAsync HydraReader.Read
 
     gt0 top5Categories
 }
@@ -215,9 +201,7 @@ let ``Where subqueryOne``() = task {
 
 [<Test>]
 let ``Select Columns with Option``() = task {
-    use ctx = openContext()
-
-    let! values = 
+    let! values =
         selectAsync openContext {
             for p in OT.PRODUCTS do
             where (p.LIST_PRICE <> None)
@@ -246,12 +230,11 @@ let ``Insert Country``() = task {
 
     results =! 1
 
-    let! wl = 
-        select {
+    let! wl =
+        selectTask ctx {
             for c in OT.COUNTRIES do
             where (c.COUNTRY_ID = "WL")
         }
-        |> ctx.ReadAsync HydraReader.Read
 
     gt0 wl
 }
@@ -270,12 +253,11 @@ let ``Update Country``() = task {
 
     results >! 0
 
-    let! wl = 
-        select {
+    let! wl =
+        selectTask ctx {
             for c in OT.COUNTRIES do
                 where (c.COUNTRY_NAME = "Wonder Land")
         }
-        |> ctx.ReadAsync HydraReader.Read
 
     gt0 wl
 }
@@ -291,12 +273,11 @@ let ``Delete Country``() = task {
         }
         |> ctx.DeleteAsync
 
-    let! wl = 
-        select {
+    let! wl =
+        selectTask ctx {
             for c in OT.COUNTRIES do
             where (c.COUNTRY_ID = "WL")
         }
-        |> ctx.ReadAsync HydraReader.Read
 
     Assert.IsTrue(wl |> Seq.length = 0, "Should be deleted")
 }
@@ -318,12 +299,12 @@ let ``Insert and Get Id``() = task {
         }
         |> ctx.InsertAsync
 
-    let! region = 
-        select {
+    let! region =
+        selectTask ctx {
             for r in OT.REGIONS do
             where (r.REGION_ID = regionId)
+            tryHead
         }
-        |> ctx.ReadOneAsync HydraReader.Read
     
     match region with
     | Some (r: OT.REGIONS) -> 
@@ -361,13 +342,12 @@ let ``Multiple Inserts``() = task {
         Assert.AreEqual(rowsInserted, 3, "Expected 3 rows to be inserted")
 
         let! results =
-            select {
+            selectTask ctx {
                 for c in OT.COUNTRIES do
                 where (c.COUNTRY_ID =% "X%")
                 orderBy c.COUNTRY_ID
                 select c.COUNTRY_ID
             }
-            |> ctx.ReadAsync HydraReader.Read
 
         let codes = results |> Seq.toList
 

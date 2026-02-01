@@ -9,7 +9,9 @@
       "WebFetch(domain:github.com)",
       "Bash(gh issue view:*)",
       "Bash(dotnet run:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(wc:*)",
+      "Bash(dotnet restore:*)"
     ],
     "deny": []
   }

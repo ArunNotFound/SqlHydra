@@ -136,8 +136,7 @@ let getSchema (cfg: Config, isLegacy: bool) : Schema =
         |> Seq.filter (fun t -> not (systemOwners.Contains t.Schema)) // Exclude Oracle system tables
         |> Seq.toList
 
-    { 
+    {
         Tables = tables
         Enums = []
-        PrimitiveTypeReaders = OracleDataTypes.primitiveTypeReaders
     }

@@ -5,7 +5,7 @@ open System
 module VersionCheck =
 
     /// The minimum version of SqlHydra.Cli that is compatible with this runtime.
-    let minimumSupportedCli = Version(3, 3, 0)
+    let minimumSupportedCli = Version(4, 0, 0)
 
     /// Asserts that the SqlHydra.Cli version used to generate code is compatible with the runtime.
     let assertIsCompatible (cli: Version) (ns: string) =

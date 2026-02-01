@@ -161,56 +161,6 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
             return reader :?> 'Reader
         }
 
-    /// Executes a select query with a given readEntity builder function.
-    member this.Read<'Entity, 'Reader & #DbDataReader> (readEntityBuilder: 'Reader -> (unit -> 'Entity)) (query: SelectQuery<'Entity>) =
-        use cmd = this.BuildCommand(query.ToKataQuery())
-        use reader = cmd.ExecuteReader() :?> 'Reader
-        let readEntity = readEntityBuilder reader
-        seq [| 
-            while reader.Read() do
-                readEntity() 
-        |] 
-
-    /// Executes a select query with a given readEntity builder function.
-    member this.ReadAsync<'Entity, 'Reader & #DbDataReader> (readEntityBuilder: 'Reader -> (unit -> 'Entity)) (query: SelectQuery<'Entity>) = 
-        this.ReadAsyncWithOptions (query, readEntityBuilder)
-
-    /// Executes a select query with a given readEntity builder function and optional args.
-    member this.ReadAsyncWithOptions<'Entity, 'Reader & #DbDataReader> 
-        (query: SelectQuery<'Entity>, readEntityBuilder: 'Reader -> (unit -> 'Entity), ?cancel: CancellationToken) = 
-        task { // Must wrap in task to prevent `EndExecuteNonQuery` ex in NET6_0_OR_GREATER
-            let cancel = defaultArg cancel CancellationToken.None
-            use cmd = this.BuildCommand (query.ToKataQuery())
-            use! reader = cmd.ExecuteReaderAsync(cancel)
-            let readEntity = readEntityBuilder (reader :?> 'Reader)
-            let results = ResizeArray<'Entity>()
-            
-            let! hasMore = reader.ReadAsync(cancel)
-            let mutable hasMore = hasMore
-            while hasMore && not cancel.IsCancellationRequested do
-                results.Add(readEntity ())
-                let! hasMore' = reader.ReadAsync(cancel)
-                hasMore <- hasMore'
-            
-            return results :> seq<'Entity>
-        }
-
-    /// Executes a select query with a given readEntity builder function for a single (option) result.
-    member this.ReadOne<'Entity, 'Reader & #DbDataReader> (readEntityBuilder: 'Reader -> (unit -> 'Entity)) (query: SelectQuery<'Entity>) =
-        this.Read readEntityBuilder query |> Seq.tryHead
-
-    /// Executes a select query with a given readEntity builder function for a single (option) result.
-    member this.ReadOneAsync<'Entity, 'Reader & #DbDataReader> (readEntityBuilder: 'Reader -> (unit -> 'Entity)) (query: SelectQuery<'Entity>) = 
-        this.ReadOneAsyncWithOptions(query, readEntityBuilder)
-
-    /// Executes a select query with a given readEntity builder function for a single (option) result with optional args.
-    member this.ReadOneAsyncWithOptions<'Entity, 'Reader & #DbDataReader>
-        (query: SelectQuery<'Entity>, readEntityBuilder: 'Reader -> (unit -> 'Entity), ?cancel: CancellationToken) = 
-        task { // Must wrap in task to prevent `EndExecuteNonQuery` ex in NET6_0_OR_GREATER
-            let! entities = this.ReadAsyncWithOptions (query, readEntityBuilder, cancel |> Option.defaultValue CancellationToken.None)
-            return entities |> Seq.tryHead
-        }
-
     member this.Insert<'T, 'InsertReturn> (iq: InsertQuery<'T, 'InsertReturn>) = 
         let compiledQuery = iq.ToKataQuery() |> compiler.Compile
         use cmd = this.BuildCommand(compiledQuery, log = false) // We will log manually below to capture query changes

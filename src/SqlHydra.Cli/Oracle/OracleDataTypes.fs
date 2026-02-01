@@ -3,67 +3,64 @@
 open System.Data
 open SqlHydra.Domain
 
-let private r : Oracle.ManagedDataAccess.Client.OracleDataReader = null
-
 /// A list of supported column type mappings
 let supportedTypeMappings =
     [   // https://docs.oracle.com/cd/B19306_01/win.102/b14306/appendixa.htm
-        "PLS_INTEGER",                                  "int",                          DbType.Int32,               nameof r.GetInt32
-        "LONG",                                         "int64",                        DbType.Int64,               nameof r.GetInt64
-        "NUMBER",                                       "decimal",                      DbType.Decimal,             nameof r.GetDecimal
-        "FLOAT",                                        "double",                       DbType.Double,              nameof r.GetDouble
-        "BINARY_DOUBLE",                                "double",                       DbType.Double,              nameof r.GetDouble
-        "BINARY_FLOAT",                                 "System.Single",                DbType.Single,              nameof r.GetFieldValue
-        "REAL",                                         "System.Single",                DbType.Single,              nameof r.GetFieldValue
-        "ROWID",                                        "string",                       DbType.String,              nameof r.GetString
-        "UROWID",                                       "string",                       DbType.String,              nameof r.GetString
-        "VARCHAR",                                      "string",                       DbType.String,              nameof r.GetString
-        "VARCHAR2",                                     "string",                       DbType.String,              nameof r.GetString
-        "NVARCHAR",                                     "string",                       DbType.String,              nameof r.GetString
-        "NVARCHAR2",                                    "string",                       DbType.String,              nameof r.GetString
-        "CHAR",                                         "string",                       DbType.String,              nameof r.GetString
-        "XMLType",                                      "string",                       DbType.String,              nameof r.GetString
-        "NCHAR",                                        "string",                       DbType.StringFixedLength,   nameof r.GetString
-        "TEXT",                                         "string",                       DbType.String,              nameof r.GetString
-        "NTEXT",                                        "string",                       DbType.String,              nameof r.GetString
-        "CLOB",                                         "string",                       DbType.String,              nameof r.GetString
-        "NCLOB",                                        "string",                       DbType.String,              nameof r.GetString
-        "DATE",                                         "System.DateTime",              DbType.Date,                nameof r.GetDateTime        
-        "TIMESTAMP",                                    "System.DateTime",              DbType.Date,                nameof r.GetDateTime
-        "TIMESTAMP WITH LOCAL TIME ZONE",               "System.DateTime",              DbType.Date,                nameof r.GetDateTime
-        "TIMESTAMP WITH TIME ZONE",                     "System.DateTime",              DbType.Date,                nameof r.GetDateTime
-        "INTERVAL DAY TO SECOND",                       "System.TimeSpan",              DbType.Time,                nameof r.GetTimeSpan
+        "PLS_INTEGER",                                  "int",                          DbType.Int32
+        "LONG",                                         "int64",                        DbType.Int64
+        "NUMBER",                                       "decimal",                      DbType.Decimal
+        "FLOAT",                                        "double",                       DbType.Double
+        "BINARY_DOUBLE",                                "double",                       DbType.Double
+        "BINARY_FLOAT",                                 "System.Single",                DbType.Single
+        "REAL",                                         "System.Single",                DbType.Single
+        "ROWID",                                        "string",                       DbType.String
+        "UROWID",                                       "string",                       DbType.String
+        "VARCHAR",                                      "string",                       DbType.String
+        "VARCHAR2",                                     "string",                       DbType.String
+        "NVARCHAR",                                     "string",                       DbType.String
+        "NVARCHAR2",                                    "string",                       DbType.String
+        "CHAR",                                         "string",                       DbType.String
+        "XMLType",                                      "string",                       DbType.String
+        "NCHAR",                                        "string",                       DbType.StringFixedLength
+        "TEXT",                                         "string",                       DbType.String
+        "NTEXT",                                        "string",                       DbType.String
+        "CLOB",                                         "string",                       DbType.String
+        "NCLOB",                                        "string",                       DbType.String
+        "DATE",                                         "System.DateTime",              DbType.Date
+        "TIMESTAMP",                                    "System.DateTime",              DbType.Date
+        "TIMESTAMP WITH LOCAL TIME ZONE",               "System.DateTime",              DbType.Date
+        "TIMESTAMP WITH TIME ZONE",                     "System.DateTime",              DbType.Date
+        "INTERVAL DAY TO SECOND",                       "System.TimeSpan",              DbType.Time
 
         for x in 0 .. 9 do
-            $"TIMESTAMP({x})",                          "System.DateTime",              DbType.Date,                nameof r.GetDateTime
-            $"TIMESTAMP({x}) WITH LOCAL TIME ZONE",     "System.DateTime",              DbType.Date,                nameof r.GetDateTime
-            $"TIMESTAMP({x}) WITH TIME ZONE",           "System.DateTime",              DbType.Date,                nameof r.GetDateTime
+            $"TIMESTAMP({x})",                          "System.DateTime",              DbType.Date
+            $"TIMESTAMP({x}) WITH LOCAL TIME ZONE",     "System.DateTime",              DbType.Date
+            $"TIMESTAMP({x}) WITH TIME ZONE",           "System.DateTime",              DbType.Date
             for y in 0 .. 9 do
-                $"INTERVAL DAY({x}) TO SECOND({y})",    "System.TimeSpan",              DbType.Time,                nameof r.GetTimeSpan
+                $"INTERVAL DAY({x}) TO SECOND({y})",    "System.TimeSpan",              DbType.Time
 
-        "BFILE",                                        "byte[]",                       DbType.Binary,              nameof r.GetFieldValue
-        "BLOB",                                         "byte[]",                       DbType.Binary,              nameof r.GetFieldValue
-        "LONG RAW",                                     "byte[]",                       DbType.Binary,              nameof r.GetFieldValue
-        "RAW",                                          "byte[]",                       DbType.Binary,              nameof r.GetFieldValue
+        "BFILE",                                        "byte[]",                       DbType.Binary
+        "BLOB",                                         "byte[]",                       DbType.Binary
+        "LONG RAW",                                     "byte[]",                       DbType.Binary
+        "RAW",                                          "byte[]",                       DbType.Binary
     ]
 
 let typeMappingsByName =
     supportedTypeMappings
-    |> List.map (fun (columnTypeAlias, clrType, dbType, readerMethod) ->
+    |> List.map (fun (columnTypeAlias, clrType, dbType) ->
         columnTypeAlias,
-        { 
+        {
             TypeMapping.ColumnTypeAlias = columnTypeAlias
             TypeMapping.ClrType = clrType
             TypeMapping.DbType = dbType
-            TypeMapping.ReaderMethod = readerMethod
             TypeMapping.ProviderDbType = None
         }
     )
     |> Map.ofList
-        
+
 let tryFindTypeMapping (providerTypeName: string, precisionMaybe: int option, scaleMaybe: int option) =
     typeMappingsByName.TryFind (providerTypeName.ToUpper())
-    |> Option.map (fun mapping -> 
+    |> Option.map (fun mapping ->
         // Precision and scale defaults:
         // https://docs.oracle.com/cd/B28359_01/server.111/b28318/datatype.htm#CNCPT313
         let precision = precisionMaybe |> Option.defaultValue 38
@@ -72,37 +69,30 @@ let tryFindTypeMapping (providerTypeName: string, precisionMaybe: int option, sc
         // NUMBER -> CLR mappings:
         // https://docs.oracle.com/cd/B19306_01/gateways.102/b14270/apa.htm
         match mapping.ColumnTypeAlias, precision, scale with
-        | "NUMBER", precision, 0 when 0 <= precision && precision < 6 -> 
-            { mapping with ClrType = "int16"; DbType = DbType.Int16; ReaderMethod = nameof r.GetInt16 }
+        | "NUMBER", precision, 0 when 0 <= precision && precision < 6 ->
+            { mapping with ClrType = "int16"; DbType = DbType.Int16 }
 
         | "NUMBER", precision, 0 when precision < 11 ->
-            { mapping with ClrType = "int"; DbType = DbType.Int32; ReaderMethod = nameof r.GetInt32 }
+            { mapping with ClrType = "int"; DbType = DbType.Int32 }
 
         | "NUMBER", precision, 0 when precision < 20 ->
-            { mapping with ClrType = "int64"; DbType = DbType.Int64; ReaderMethod = nameof r.GetInt64 }
+            { mapping with ClrType = "int64"; DbType = DbType.Int64 }
 
         | "NUMBER", precision, 0 when precision >= 20 ->
-            { mapping with ClrType = "decimal"; DbType = DbType.Decimal; ReaderMethod = nameof r.GetDecimal }
+            { mapping with ClrType = "decimal"; DbType = DbType.Decimal }
 
         | "NUMBER", precision, scale when scale >= 4 ->
-            { mapping with ClrType = "decimal"; DbType = DbType.Decimal; ReaderMethod = nameof r.GetDecimal }
+            { mapping with ClrType = "decimal"; DbType = DbType.Decimal }
 
         | "NUMBER", precision, scale when 0 <= precision && precision < 8 && scale > 0 ->
-            { mapping with ClrType = "System.Single"; DbType = DbType.Single; ReaderMethod = nameof r.GetFieldValue }
+            { mapping with ClrType = "System.Single"; DbType = DbType.Single }
 
         | "NUMBER", precision, scale when precision < 16 && scale > 0 ->
-            { mapping with ClrType = "double"; DbType = DbType.Double; ReaderMethod = nameof r.GetDouble }
+            { mapping with ClrType = "double"; DbType = DbType.Double }
 
         | "NUMBER", precision, scale when precision >= 16 && scale > 0 ->
-            { mapping with ClrType = "decimal"; DbType = DbType.Decimal; ReaderMethod = nameof r.GetDecimal }
+            { mapping with ClrType = "decimal"; DbType = DbType.Decimal }
 
         | _ ->
             mapping
     )
-        
-let primitiveTypeReaders = 
-    supportedTypeMappings
-    |> List.map (fun (_, clrType, _, readerMethod) ->
-        { PrimitiveTypeReader.ClrType = clrType; PrimitiveTypeReader.ReaderMethod = readerMethod }
-    )
-    |> List.distinctBy (fun ptr -> ptr.ClrType)

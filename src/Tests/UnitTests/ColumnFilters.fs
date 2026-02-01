@@ -8,7 +8,7 @@ open SqlHydra.SchemaFilters
 let col nm = 
     {
         Name = nm
-        TypeMapping = { ClrType = ""; ColumnTypeAlias = ""; DbType = System.Data.DbType.String; ReaderMethod = ""; ProviderDbType = None }
+        TypeMapping = { ClrType = ""; ColumnTypeAlias = ""; DbType = System.Data.DbType.String; ProviderDbType = None }
         IsNullable = false
         IsPK = false
     }

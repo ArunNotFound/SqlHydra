@@ -15,7 +15,6 @@ open SqlServer.AdventureWorksNet9
 open SqlServer.AdventureWorksNet10
 #endif
 
-open HydraBuilders
 
 [<Test>]
 let ``selectAsync - no select``() = async {    

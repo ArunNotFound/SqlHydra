@@ -29,14 +29,11 @@ let openContext() =
 
 [<Test>]
 let ``Where City Contains``() = task {
-    use ctx = openContext()
-            
-    let addresses =
-        select {
+    let! addresses =
+        selectTask openContext {
             for a in person.address do
             where (a.city |=| [ "Seattle"; "Santa Cruz" ])
         }
-        |> ctx.Read HydraReader.Read
 
     gt0 addresses
     Assert.IsTrue(addresses |> Seq.forall (fun a -> a.city = "Seattle" || a.city = "Santa Cruz"), "Expected only 'Seattle' or 'Santa Cruz'.")
@@ -44,15 +41,12 @@ let ``Where City Contains``() = task {
 
 [<Test>]
 let ``Select city Column Where city Starts with S``() = task {
-    use ctx = openContext()
-
-    let cities =
-        select {
+    let! cities =
+        selectTask openContext {
             for a in person.address do
             where (a.city =% "S%")
             select a.city
         }
-        |> ctx.Read HydraReader.Read
 
     gt0 cities
     Assert.IsTrue(cities |> Seq.forall (fun city -> city.StartsWith "S"), "Expected all cities to start with 'S'.")
@@ -60,26 +54,21 @@ let ``Select city Column Where city Starts with S``() = task {
 
 [<Test>]
 let ``Inner Join Orders-Details``() = task {
-    use ctx = openContext()
-
-    let query =
-        select {
+    let! results =
+        selectTask openContext {
             for o in sales.salesorderheader do
             join d in sales.salesorderdetail on (o.salesorderid = d.salesorderid)
             where o.onlineorderflag
             select (o, d)
         }
 
-    let! results = query |> ctx.ReadAsync HydraReader.Read
     gt0 results
 }
 
 [<Test>]
 let ``Product with Category name``() = task {
-    use ctx = openContext()
-
-    let query = 
-        select {
+    let! rows =
+        selectTask openContext {
             for p in production.product do
             join sc in production.productsubcategory on (p.productsubcategoryid = Some sc.productsubcategoryid)
             join c in production.productcategory on (sc.productcategoryid = c.productcategoryid)
@@ -87,24 +76,19 @@ let ``Product with Category name``() = task {
             take 5
         }
 
-    let! rows = query |> ctx.ReadAsync HydraReader.Read
     gt0 rows
 }
 
 [<Test>]
 let ``Select Column Aggregates From Product IDs 1-3``() = task {
-    use ctx = openContext()
-
-    let query =
-        select {
+    let! aggregates =
+        selectTask openContext {
             for p in production.product do
             where (p.productsubcategoryid <> None)
             groupBy p.productsubcategoryid
             where (p.productsubcategoryid.Value |=| [ 1; 2; 3 ])
             select (p.productsubcategoryid, minBy p.listprice, maxBy p.listprice, avgBy p.listprice, countBy p.listprice, sumBy p.listprice)
         }
-
-    let! aggregates = query |> ctx.ReadAsync HydraReader.Read
 
     gt0 aggregates
 
@@ -127,22 +111,19 @@ let ``Select Column Aggregates From Product IDs 1-3``() = task {
 
 [<Test>]
 let ``Aggregate Subquery One``() = task {
-    use ctx = openContext()
-
-    let avgListPrice = 
+    let avgListPrice =
         select {
             for p in production.product do
             select (avgBy p.listprice)
         }
 
-    let! productsWithHigherThanAvgPrice = 
-        select {
+    let! productsWithHigherThanAvgPrice =
+        selectTask openContext {
             for p in production.product do
             where (p.listprice > subqueryOne avgListPrice)
             orderByDescending p.listprice
             select (p.name, p.listprice)
         }
-        |> ctx.ReadAsync HydraReader.Read
 
     let avgListPrice = 438.6662M
 
@@ -152,27 +133,22 @@ let ``Aggregate Subquery One``() = task {
 
 [<Test>]
 let ``Select Column Aggregates``() = task {
-    use ctx = openContext()
-
-    let! aggregates = 
-        select {
+    let! aggregates =
+        selectTask openContext {
             for p in production.product do
             where (p.productsubcategoryid <> None)
             groupBy p.productsubcategoryid
             where (p.productsubcategoryid.Value |=| [ 1; 2; 3 ])
             select (p.productsubcategoryid, minBy p.listprice, maxBy p.listprice)
         }
-        |> ctx.ReadAsync HydraReader.Read
 
     gt0 aggregates
 }
 
 [<Test>]
 let ``Sorted Aggregates - Top 5 categories with highest avg price products``() = task {
-    use ctx = openContext()
-
-    let! aggregates = 
-        select {
+    let! aggregates =
+        selectTask openContext {
             for p in production.product do
             where (p.productsubcategoryid <> None)
             groupBy p.productsubcategoryid
@@ -180,16 +156,13 @@ let ``Sorted Aggregates - Top 5 categories with highest avg price products``() =
             select (p.productsubcategoryid, avgBy p.listprice)
             take 5
         }
-        |> ctx.ReadAsync HydraReader.Read
 
     gt0 aggregates
 }
 
 [<Test>]
 let ``Where subqueryMany``() = task {
-    use ctx = openContext()
-
-    let top5CategoryIdsWithHighestAvgPrices = 
+    let top5CategoryIdsWithHighestAvgPrices =
         select {
             for p in production.product do
             where (p.productsubcategoryid <> None)
@@ -200,48 +173,41 @@ let ``Where subqueryMany``() = task {
         }
 
     let! top5Categories =
-        select {
+        selectTask openContext {
             for c in production.productcategory do
             where (Some c.productcategoryid |=| subqueryMany top5CategoryIdsWithHighestAvgPrices)
             select c.name
         }
-        |> ctx.ReadAsync HydraReader.Read
 
     gt0 top5Categories
 }
 
 [<Test>]
 let ``Where subqueryOne``() = task {
-    use ctx = openContext()
-
-    let avgListPrice = 
+    let avgListPrice =
         select {
             for p in production.product do
             select (avgBy p.listprice)
-        } 
+        }
 
     let! productsWithAboveAveragePrice =
-        select {
+        selectTask openContext {
             for p in production.product do
             where (p.listprice > subqueryOne avgListPrice)
             select (p.name, p.listprice)
         }
-        |> ctx.ReadAsync HydraReader.Read
 
     gt0 productsWithAboveAveragePrice
 }
 
 [<Test>]
 let ``Select Columns with Option``() = task {
-    use ctx = openContext()
-
-    let! values = 
-        select {
+    let! values =
+        selectTask openContext {
             for p in production.product do
             where (p.productsubcategoryid <> None)
             select (p.productsubcategoryid, p.listprice)
         }
-        |> ctx.ReadAsync HydraReader.Read
 
     gt0 values
     Assert.IsTrue(values |> Seq.forall (fun (catId, price) -> catId <> None), "Expected subcategories to all have a value.")
@@ -265,12 +231,11 @@ let ``Insert Currency``() = task {
 
     results =! 1
 
-    let! btc = 
-        select {
+    let! btc =
+        selectTask ctx {
             for c in sales.currency do
             where (c.currencycode = "BTC")
         }
-        |> ctx.ReadAsync HydraReader.Read
 
     gt0 btc
 }
@@ -289,12 +254,11 @@ let ``Update Currency``() = task {
 
     results >! 0
 
-    let! btc = 
-        select {
+    let! btc =
+        selectTask ctx {
             for c in sales.currency do
             where (c.name = "BitCoinzz")
         }
-        |> ctx.ReadAsync HydraReader.Read
 
     gt0 btc
 }
@@ -310,12 +274,11 @@ let ``Delete Currency``() = task {
         }
         |> ctx.DeleteAsync
 
-    let! btc = 
-        select {
+    let! btc =
+        selectTask ctx {
             for c in sales.currency do
             where (c.currencycode = "BTC")
         }
-        |> ctx.ReadAsync HydraReader.Read
 
     Assert.IsTrue(btc |> Seq.length = 0, "Should be deleted")
 }
@@ -341,12 +304,11 @@ let ``Insert Network``() = task {
 
     results =! 1
 
-    let! ipAddr = 
-        select {
+    let! ipAddr =
+        selectTask ctx {
             for c in network_sample.network_addresses do
             where (c.net_inet = System.Net.IPAddress.Parse "127.0.0.2")
         }
-        |> ctx.ReadAsync HydraReader.Read
 
     gt0 ipAddr
 }
@@ -383,12 +345,12 @@ let ``Insert and Get Id``() = task {
             getId r.productreviewid
         }
 
-    let! review = 
-        select {
+    let! review =
+        selectTask ctx {
             for r in production.productreview do
             where (r.reviewername = "Gary Fisher")
+            tryHead
         }
-        |> ctx.ReadOneAsync HydraReader.Read
             
     match review with
     | Some (rev : production.productreview) -> 
@@ -405,12 +367,11 @@ let ``Insert and Get Id``() = task {
 
     Assert.AreEqual(deletedCount, 1, "Expected exactly one review to be deleted")
 
-    let! reviews = 
-        select {
+    let! reviews =
+        selectTask ctx {
             for r in production.productreview do
             where (r.reviewername = "Gary Fisher")
         }
-        |> ctx.ReadAsync HydraReader.Read
 
     Assert.AreEqual(reviews |> Seq.length, 0, "Expected no reviews to be queryable")
     ctx.CommitTransaction()
@@ -445,13 +406,12 @@ let ``Multiple Inserts``() = task {
         Assert.AreEqual(rowsInserted, 3, "Expected 3 rows to be inserted")
 
         let! results =
-            select {
+            selectTask ctx {
                 for c in sales.currency do
                 where (c.currencycode =% "BC%")
                 orderBy c.currencycode
                 select c.currencycode
             }
-            |> ctx.ReadAsync HydraReader.Read
 
         let codes = results |> Seq.toList
     
@@ -519,11 +479,11 @@ let ``Insert, Update and Read npgsql provider specific db fields``() = task {
         Assert.AreEqual(dbValue.Replace(" ", ""), jsonValue, err)
                 
     let getRowById id =
-        select {
+        selectTask ctx {
             for e in ext.jsonsupport do
-                select e
-                where (e.id = id)
-        } |> ctx.ReadAsync HydraReader.Read
+            select e
+            where (e.id = id)
+        }
                 
     // Simple insert of one entity
     let jsonValue = """{"name":"test"}"""
@@ -649,27 +609,28 @@ let ``OnConflictDoUpdate``() = task {
             onConflictDoUpdate c.currencycode (c.name, c.modifieddate)
         } :> Task
 
-    let queryCurrency code = 
-        select {
-            for c in sales.currency do
-            where (c.currencycode = code)
-        }
-        |> ctx.Read HydraReader.Read
-        |> Seq.head
+    let queryCurrency code = task {
+        let! results =
+            selectTask ctx {
+                for c in sales.currency do
+                where (c.currencycode = code)
+            }
+        return results |> Seq.head
+    }
 
-    let newCurrency = 
+    let newCurrency =
         { sales.currency.currencycode = "NEW"
         ; sales.currency.name = "New Currency"
         ; sales.currency.modifieddate = System.DateTime.Today }
 
     do! upsertCurrency newCurrency
-    let query1 = queryCurrency "NEW"
+    let! query1 = queryCurrency "NEW"
     query1 =! newCurrency
 
     let editedCurrency = { query1 with name = "Edited Currency" }
-            
+
     do! upsertCurrency editedCurrency
-    let query2 = queryCurrency "NEW"
+    let! query2 = queryCurrency "NEW"
     query2 =! editedCurrency
 
     ctx.RollbackTransaction()
@@ -689,26 +650,27 @@ let ``OnConflictDoNothing``() = task {
         |> ctx.Insert
         |> ignore
             
-    let queryCurrency code = 
-        select {
-            for c in sales.currency do
-            where (c.currencycode = code)
-        }
-        |> ctx.Read HydraReader.Read
-        |> Seq.head
+    let queryCurrency code = task {
+        let! results =
+            selectTask ctx {
+                for c in sales.currency do
+                where (c.currencycode = code)
+            }
+        return results |> Seq.head
+    }
 
-    let newCurrency = 
+    let newCurrency =
         { sales.currency.currencycode = "NEW"
         ; sales.currency.name = "New Currency"
         ; sales.currency.modifieddate = System.DateTime.Today }
 
     tryInsertCurrency newCurrency
-    let query1 = queryCurrency "NEW"
+    let! query1 = queryCurrency "NEW"
     query1 =! newCurrency
 
     let editedCurrency = { query1 with name = "Edited Currency" }
     tryInsertCurrency editedCurrency
-    let query2 = queryCurrency "NEW"
+    let! query2 = queryCurrency "NEW"
     query2 =! newCurrency
 
     ctx.RollbackTransaction()

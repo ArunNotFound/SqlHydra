@@ -37,14 +37,11 @@ let stubbedErrorLog =
 
 [<Test>]
 let ``Where City Starts With S``() = task {
-    use ctx = openContext()
-            
-    let addresses =
-        select {
+    let! addresses =
+        selectTask openContext {
             for a in main.Address do
             where (a.City |=| [ "Seattle"; "Santa Cruz" ])
         }
-        |> ctx.Read HydraReader.Read
 
     gt0 addresses
     Assert.IsTrue(addresses |> Seq.forall (fun a -> a.City = "Seattle" || a.City = "Santa Cruz"), "Expected only 'Seattle' or 'Santa Cruz'.")
@@ -52,15 +49,12 @@ let ``Where City Starts With S``() = task {
 
 [<Test>]
 let ``Select City Column Where City Starts with S``() = task {
-    use ctx = openContext()
-
-    let cities =
-        select {
+    let! cities =
+        selectTask openContext {
             for a in main.Address do
             where (a.City =% "S%")
             select a.City
         }
-        |> ctx.Read HydraReader.Read
 
     gt0 cities
     Assert.IsTrue(cities |> Seq.forall (fun city -> city.StartsWith "S"), "Expected all cities to start with 'S'.")
@@ -68,37 +62,31 @@ let ``Select City Column Where City Starts with S``() = task {
 
 [<Test>]
 let ``Inner Join Orders-Details``() = task {
-    use ctx = openContext()
-
-    let query =
-        select {
+    let! results =
+        selectTask openContext {
             for o in main.SalesOrderHeader do
             join d in main.SalesOrderDetail on (o.SalesOrderID = d.SalesOrderID)
             where (o.OnlineOrderFlag = 0L)
             select (o, d)
         }
 
-    let! results = query |> ctx.ReadAsync HydraReader.Read
     gt0 results
 }
 
 [<Test>]
 let ``Where subqueryOne``() = task {
-    use ctx = openContext()
-
-    let avgListPrice = 
+    let avgListPrice =
         select {
             for p in main.Product do
             select (avgBy p.ListPrice)
-        } 
+        }
 
     let! productsWithAboveAveragePrice =
-        select {
+        selectTask openContext {
             for p in main.Product do
             where (p.ListPrice > subqueryOne avgListPrice)
             select (p.Name, p.ListPrice)
         }
-        |> ctx.ReadAsync HydraReader.Read
 
     gt0 productsWithAboveAveragePrice
 }
@@ -287,11 +275,10 @@ let ``Multiple Inserts``() = task {
         ()
 
     let! results =
-        select {
+        selectTask ctx {
             for e in main.ErrorLog do
             select e.ErrorNumber
         }
-        |> ctx.ReadAsync HydraReader.Read
 
     let errorNumbers = results |> Seq.toList
     

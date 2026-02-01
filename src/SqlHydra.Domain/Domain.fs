@@ -10,13 +10,12 @@ let private valueTypes =
 let isValueType (typeName: string) = 
     valueTypes.Contains typeName
 
-type TypeMapping = 
+type TypeMapping =
     {
         ClrType: string
         DbType: DbType
         ProviderDbType: string option
         ColumnTypeAlias: string
-        ReaderMethod: string
     }
     member this.IsValueType() = 
         isValueType this.ClrType
@@ -56,21 +55,12 @@ type Enum =
         Labels: EnumLabel list
     }
 
-type PrimitiveTypeReader =
-    {
-        ClrType: string
-        ReaderMethod: string
-    }
-
-type Schema = 
+type Schema =
     {
         Tables: Table list
 
         /// Support for Postgres enums
         Enums: Enum list
-
-        /// A distinct list of ClrTypes that have an associated data reader method. Ex: `"int", "GetInt32"`
-        PrimitiveTypeReaders: PrimitiveTypeReader seq
     }
 
 type ReadersConfig = 

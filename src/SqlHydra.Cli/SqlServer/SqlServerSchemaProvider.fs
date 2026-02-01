@@ -110,8 +110,7 @@ let getSchema (cfg: Config, isLegacy: bool) : Schema =
         )
         |> Seq.toList
 
-    { 
-        Tables = tables 
+    {
+        Tables = tables
         Enums = []
-        PrimitiveTypeReaders = SqlServerDataTypes.primitiveTypeReaders isLegacy
     }

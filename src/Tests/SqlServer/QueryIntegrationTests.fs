@@ -18,7 +18,7 @@ open SqlServer.AdventureWorksNet9
 open SqlServer.AdventureWorksNet10
 #endif
 open Microsoft.SqlServer.Types
-open HydraBuilders
+
 
 let openContext() = 
     db.OpenContext()
@@ -38,14 +38,11 @@ let stubbedErrorLog =
 
 [<Test>]
 let ``Where City Starts With S``() = task {
-    use ctx = openContext()
-            
-    let addresses =
-        select {
+    let! addresses =
+        selectTask openContext {
             for a in Person.Address do
             where (a.City |=| [ "Seattle"; "Santa Cruz" ])
         }
-        |> ctx.Read HydraReader.Read
 
     gt0 addresses
     Assert.IsTrue(addresses |> Seq.forall (fun a -> a.City = "Seattle" || a.City = "Santa Cruz"), "Expected only 'Seattle' or 'Santa Cruz'.")
@@ -53,15 +50,12 @@ let ``Where City Starts With S``() = task {
 
 [<Test>]
 let ``Select City Column Where City Starts with S``() = task {
-    use ctx = openContext()
-
-    let cities =
-        select {
+    let! cities =
+        selectTask openContext {
             for a in Person.Address do
             where (a.City =% "S%")
             select a.City
         }
-        |> ctx.Read HydraReader.Read
 
     gt0 cities
     Assert.IsTrue(cities |> Seq.forall (fun city -> city.StartsWith "S"), "Expected all cities to start with 'S'.")
@@ -69,26 +63,21 @@ let ``Select City Column Where City Starts with S``() = task {
 
 [<Test>]
 let ``Inner Join Orders-Details``() = task {
-    use ctx = openContext()
-
-    let query =
-        select {
+    let! results =
+        selectTask openContext {
             for o in Sales.SalesOrderHeader do
             join d in Sales.SalesOrderDetail on (o.SalesOrderID = d.SalesOrderID)
             where o.OnlineOrderFlag
             select (o, d)
         }
 
-    let! results = query |> ctx.ReadAsync HydraReader.Read
     gt0 results
 }
 
 [<Test>]
 let ``Product with Category Name``() = task {
-    use ctx = openContext()
-
-    let query = 
-        select {
+    let! rows =
+        selectTask openContext {
             for p in Production.Product do
             join sc in Production.ProductSubcategory on (p.ProductSubcategoryID = Some sc.ProductSubcategoryID)
             join c in Production.ProductCategory on (sc.ProductCategoryID = c.ProductCategoryID)
@@ -96,24 +85,19 @@ let ``Product with Category Name``() = task {
             take 5
         }
 
-    let! rows = query |> ctx.ReadAsync HydraReader.Read
     gt0 rows
 }
 
 [<Test>]
 let ``Select Column Aggregates From Product IDs 1-3``() = task {
-    use ctx = openContext()
-
-    let query =
-        select {
+    let! aggregates =
+        selectTask openContext {
             for p in Production.Product do
             where (p.ProductSubcategoryID <> None)
             groupBy p.ProductSubcategoryID
             where (p.ProductSubcategoryID.Value |=| [ 1; 2; 3 ])
             select (p.ProductSubcategoryID, minBy p.ListPrice, maxBy p.ListPrice, avgBy p.ListPrice, countBy p.ListPrice, sumBy p.ListPrice)
         }
-
-    let! aggregates = query |> ctx.ReadAsync HydraReader.Read
 
     gt0 aggregates
             
@@ -129,22 +113,19 @@ let ``Select Column Aggregates From Product IDs 1-3``() = task {
 
 [<Test>]
 let ``Aggregate Subquery One``() = task {
-    use ctx = openContext()
-
-    let avgListPrice = 
+    let avgListPrice =
         select {
             for p in Production.Product do
             select (avgBy p.ListPrice)
         }
 
-    let! productsWithHigherThanAvgPrice = 
-        select {
+    let! productsWithHigherThanAvgPrice =
+        selectTask openContext {
             for p in Production.Product do
             where (p.ListPrice > subqueryOne avgListPrice)
             orderByDescending p.ListPrice
             select (p.Name, p.ListPrice)
         }
-        |> ctx.ReadAsync HydraReader.Read
 
     let avgListPrice = 438.6662M
             
@@ -154,45 +135,36 @@ let ``Aggregate Subquery One``() = task {
 
 [<Test>]
 let ``Select Column Aggregates``() = task {
-    use ctx = openContext()
-
-    let! aggregates = 
-        select {
+    let! aggregates =
+        selectTask openContext {
             for p in Production.Product do
             where (p.ProductSubcategoryID <> None)
             groupBy p.ProductSubcategoryID
             having (minBy p.ListPrice > 50M && maxBy p.ListPrice < 1000M)
             select (p.ProductSubcategoryID, minBy p.ListPrice, maxBy p.ListPrice)
         }
-        |> ctx.ReadAsync HydraReader.Read
 
     gt0 aggregates
 }
 
 [<Test>]
 let ``Sorted Aggregates - Top 5 categories with highest avg price products``() = task {
-    use ctx = openContext()
-
-    let query = 
-        select {
-                for p in Production.Product do
-                where (p.ProductSubcategoryID <> None)
-                groupBy p.ProductSubcategoryID
-                orderByDescending (avgBy p.ListPrice)
-                select (p.ProductSubcategoryID, avgBy p.ListPrice)
-                take 5
+    let! aggregates =
+        selectTask openContext {
+            for p in Production.Product do
+            where (p.ProductSubcategoryID <> None)
+            groupBy p.ProductSubcategoryID
+            orderByDescending (avgBy p.ListPrice)
+            select (p.ProductSubcategoryID, avgBy p.ListPrice)
+            take 5
         }
-
-    let! aggregates = query |> ctx.ReadAsync HydraReader.Read
 
     gt0 aggregates
 }
 
 [<Test>]
 let ``Where subqueryMany``() = task {
-    use ctx = openContext()
-
-    let top5CategoryIdsWithHighestAvgPrices = 
+    let top5CategoryIdsWithHighestAvgPrices =
         select {
             for p in Production.Product do
             where (p.ProductSubcategoryID <> None)
@@ -203,48 +175,41 @@ let ``Where subqueryMany``() = task {
         }
 
     let! top5Categories =
-        select {
+        selectTask openContext {
             for c in Production.ProductCategory do
             where (Some c.ProductCategoryID |=| subqueryMany top5CategoryIdsWithHighestAvgPrices)
             select c.Name
         }
-        |> ctx.ReadAsync HydraReader.Read
 
     gt0 top5Categories
 }
 
 [<Test>]
 let ``Where subqueryOne``() = task {
-    use ctx = openContext()
-
-    let avgListPrice = 
+    let avgListPrice =
         select {
             for p in Production.Product do
             select (avgBy p.ListPrice)
-        } 
+        }
 
     let! productsWithAboveAveragePrice =
-        select {
+        selectTask openContext {
             for p in Production.Product do
             where (p.ListPrice > subqueryOne avgListPrice)
             select (p.Name, p.ListPrice)
         }
-        |> ctx.ReadAsync HydraReader.Read
 
     gt0 productsWithAboveAveragePrice
 }
 
 [<Test>]
 let ``Select Columns with Option``() = task {
-    use ctx = openContext()
-
-    let! values = 
-        select {
+    let! values =
+        selectTask openContext {
             for p in Production.Product do
             where (p.ProductSubcategoryID <> None)
             select (p.ProductSubcategoryID, p.ListPrice)
         }
-        |> ctx.ReadAsync HydraReader.Read
 
     gt0 values
     Assert.IsTrue(values |> Seq.forall (fun (catId, price) -> catId <> None), "Expected subcategories to all have a value.")
@@ -578,11 +543,10 @@ let ``Multiple Inserts``() = task {
     | None -> ()
 
     let! results =
-        select {
+        selectTask ctx {
             for e in dbo.ErrorLog do
             select e.ErrorNumber
         }
-        |> ctx.ReadAsync HydraReader.Read
 
     let errorNumbers = results |> Seq.toList
     
@@ -714,34 +678,28 @@ let ``Count Test Async``() = task {
 
 [<Test>]
 let ``Query Employee Record with DateOnly``() = task {
-    use ctx = openContext()
-            
     let maxBirthDate = System.DateOnly(2005, 1, 1)
 
-    let employees =
-        select {
+    let! employees =
+        selectTask openContext {
             for e in HumanResources.Employee do
             where (e.BirthDate < maxBirthDate)
             select e
         }
-        |> ctx.Read HydraReader.Read
 
     gt0 employees
 }
 
 [<Test>]
 let ``Query Employee Column with DateOnly``() = task {
-    use ctx = openContext()
-            
     let maxBirthDate = System.DateOnly(2005, 1, 1)
 
-    let employeeBirthDates =
-        select {
+    let! employeeBirthDates =
+        selectTask openContext {
             for e in HumanResources.Employee do
             where (e.BirthDate < maxBirthDate)
             select e.BirthDate
         }
-        |> ctx.Read HydraReader.Read
 
     gt0 employeeBirthDates
 }
@@ -788,16 +746,13 @@ let ``Update Employee DateOnly``() = task {
 
 [<Test>]
 let ``Query Shift Record with TimeOnly``() = task {
-    use ctx = openContext()
-            
     let minStartTime = System.TimeOnly(9, 30)
 
-    let shiftsAfter930AM =
-        select {
+    let! shiftsAfter930AM =
+        selectTask openContext {
             for s in HumanResources.Shift do
             where (s.StartTime >= minStartTime)
         }
-        |> ctx.Read HydraReader.Read
 
     // There are 3 shifts: day, evening and night. 
     // Results should contain 2 shifts: evening and night
@@ -806,17 +761,14 @@ let ``Query Shift Record with TimeOnly``() = task {
 
 [<Test>]
 let ``Query Shift Column with TimeOnly``() = task {
-    use ctx = openContext()
-            
     let minStartTime = System.TimeOnly(9, 30)
 
-    let shiftsAfter930AM =
-        select {
+    let! shiftsAfter930AM =
+        selectTask openContext {
             for s in HumanResources.Shift do
             where (s.StartTime >= minStartTime)
             select s.StartTime
         }
-        |> ctx.Read HydraReader.Read
 
     // There are 3 shifts: day, evening and night. 
     // Results should contain 2 shifts: evening and night

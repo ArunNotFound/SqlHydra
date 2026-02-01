@@ -122,5 +122,4 @@ let getSchema (cfg: Config, isLegacy: bool) : Schema =
     {
         Tables = tables
         Enums = []
-        PrimitiveTypeReaders = MySqlDataTypes.primitiveTypeReaders isLegacy
     }

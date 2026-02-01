@@ -3,89 +3,79 @@
 open System.Data
 open SqlHydra.Domain
 
-let private r : System.Data.Common.DbDataReader = null
-
 /// A list of supported column type mappings
 let supportedTypeMappings isLegacy =
-    [ 
-        "smallint",         "int16",            DbType.Int16,       nameof r.GetInt16
-        "int",              "int",              DbType.Int32,       nameof r.GetInt32
-        "real",             "double",           DbType.Double,      nameof r.GetDouble
-        "single",           "System.Single",    DbType.Single,      nameof r.GetDouble
-        "float",            "double",           DbType.Double,      nameof r.GetDouble
-        "double",           "double",           DbType.Double,      nameof r.GetDouble
-        "money",            "decimal",          DbType.Decimal,     nameof r.GetDecimal
-        "currency",         "decimal",          DbType.Decimal,     nameof r.GetDecimal
-        "decimal",          "decimal",          DbType.Decimal,     nameof r.GetDecimal
-        "numeric",          "decimal",          DbType.Decimal,     nameof r.GetDecimal
-        "bit",              "bool",             DbType.Boolean,     nameof r.GetBoolean
-        "yesno",            "bool",             DbType.Boolean,     nameof r.GetBoolean
-        "logical",          "bool",             DbType.Boolean,     nameof r.GetBoolean
-        "bool",             "bool",             DbType.Boolean,     nameof r.GetBoolean
-        "boolean",          "bool",             DbType.Boolean,     nameof r.GetBoolean
-        "tinyint",          "byte",             DbType.Byte,        nameof r.GetByte
-        "integer",          "int64",            DbType.Int64,       nameof r.GetInt64
-        "identity",         "int64",            DbType.Int64,       nameof r.GetInt64
-        "integer identity", "int64",            DbType.Int64,       nameof r.GetInt64
-        "counter",          "int64",            DbType.Int64,       nameof r.GetInt64
-        "autoincrement",    "int64",            DbType.Int64,       nameof r.GetInt64
-        "long",             "int64",            DbType.Int64,       nameof r.GetInt64
-        "bigint",           "int64",            DbType.Int64,       nameof r.GetInt64
-        "binary",           "byte[]",           DbType.Binary,      nameof r.GetFieldValue
-        "varbinary",        "byte[]",           DbType.Binary,      nameof r.GetFieldValue
-        "blob",             "byte[]",           DbType.Binary,      nameof r.GetFieldValue
-        "image",            "byte[]",           DbType.Binary,      nameof r.GetFieldValue
-        "general",          "byte[]",           DbType.Binary,      nameof r.GetFieldValue
-        "oleobject",        "byte[]",           DbType.Binary,      nameof r.GetFieldValue
-        "varchar",          "string",           DbType.String,      nameof r.GetString
-        "nvarchar",         "string",           DbType.String,      nameof r.GetString
-        "memo",             "string",           DbType.String,      nameof r.GetString
-        "longtext",         "string",           DbType.String,      nameof r.GetString
-        "longvarchar",      "string",           DbType.String,      nameof r.GetString
-        "note",             "string",           DbType.String,      nameof r.GetString
-        "text",             "string",           DbType.String,      nameof r.GetString
-        "ntext",            "string",           DbType.String,      nameof r.GetString
-        "string",           "string",           DbType.String,      nameof r.GetString
-        "char",             "string",           DbType.String,      nameof r.GetString
-        "nchar",            "string",           DbType.String,      nameof r.GetString
-        "xml",              "string",           DbType.Xml,         nameof r.GetString
-        "datetime",         "System.DateTime",  DbType.DateTime,    nameof r.GetDateTime
-        "smalldate",        "System.DateTime",  DbType.DateTime,    nameof r.GetDateTime 
-        "timestamp",        "System.DateTime",  DbType.DateTime,    nameof r.GetDateTime 
-        
-        if isLegacy then
-         "date",            "System.DateTime",  DbType.DateTime,    nameof r.GetDateTime 
-         "time",            "System.DateTime",  DbType.DateTime,    nameof r.GetDateTime 
-        else
-         "date",            "System.DateOnly",  DbType.DateTime,    "GetDateOnly"
-         "time",            "System.TimeOnly",  DbType.DateTime,    "GetTimeOnly"
+    [
+        "smallint",         "int16",            DbType.Int16
+        "int",              "int",              DbType.Int32
+        "real",             "double",           DbType.Double
+        "single",           "System.Single",    DbType.Single
+        "float",            "double",           DbType.Double
+        "double",           "double",           DbType.Double
+        "money",            "decimal",          DbType.Decimal
+        "currency",         "decimal",          DbType.Decimal
+        "decimal",          "decimal",          DbType.Decimal
+        "numeric",          "decimal",          DbType.Decimal
+        "bit",              "bool",             DbType.Boolean
+        "yesno",            "bool",             DbType.Boolean
+        "logical",          "bool",             DbType.Boolean
+        "bool",             "bool",             DbType.Boolean
+        "boolean",          "bool",             DbType.Boolean
+        "tinyint",          "byte",             DbType.Byte
+        "integer",          "int64",            DbType.Int64
+        "identity",         "int64",            DbType.Int64
+        "integer identity", "int64",            DbType.Int64
+        "counter",          "int64",            DbType.Int64
+        "autoincrement",    "int64",            DbType.Int64
+        "long",             "int64",            DbType.Int64
+        "bigint",           "int64",            DbType.Int64
+        "binary",           "byte[]",           DbType.Binary
+        "varbinary",        "byte[]",           DbType.Binary
+        "blob",             "byte[]",           DbType.Binary
+        "image",            "byte[]",           DbType.Binary
+        "general",          "byte[]",           DbType.Binary
+        "oleobject",        "byte[]",           DbType.Binary
+        "varchar",          "string",           DbType.String
+        "nvarchar",         "string",           DbType.String
+        "memo",             "string",           DbType.String
+        "longtext",         "string",           DbType.String
+        "longvarchar",      "string",           DbType.String
+        "note",             "string",           DbType.String
+        "text",             "string",           DbType.String
+        "ntext",            "string",           DbType.String
+        "string",           "string",           DbType.String
+        "char",             "string",           DbType.String
+        "nchar",            "string",           DbType.String
+        "xml",              "string",           DbType.Xml
+        "datetime",         "System.DateTime",  DbType.DateTime
+        "smalldate",        "System.DateTime",  DbType.DateTime
+        "timestamp",        "System.DateTime",  DbType.DateTime
 
-        "uniqueidentifier", "System.Guid",      DbType.Guid,        nameof r.GetGuid
-        "guid",             "System.Guid",      DbType.Guid,        nameof r.GetGuid 
+        if isLegacy then
+         "date",            "System.DateTime",  DbType.DateTime
+         "time",            "System.DateTime",  DbType.DateTime
+        else
+         "date",            "System.DateOnly",  DbType.DateTime
+         "time",            "System.TimeOnly",  DbType.DateTime
+
+        "uniqueidentifier", "System.Guid",      DbType.Guid
+        "guid",             "System.Guid",      DbType.Guid
     ]
 
 let typeMappingsByName isLegacy =
     supportedTypeMappings isLegacy
-    |> List.map (fun (columnTypeAlias, clrType, dbType, readerMethod) ->
+    |> List.map (fun (columnTypeAlias, clrType, dbType) ->
         columnTypeAlias,
-        { 
+        {
             TypeMapping.ColumnTypeAlias = columnTypeAlias
             TypeMapping.ClrType = clrType
             TypeMapping.DbType = dbType
-            TypeMapping.ReaderMethod = readerMethod
             TypeMapping.ProviderDbType = None
         }
     )
     |> Map.ofList
 
-let tryFindTypeMapping isLegacy = 
+let tryFindTypeMapping isLegacy =
     let map = typeMappingsByName isLegacy
     let toLower (str: string) = str.ToLower().Trim()
     toLower >> map.TryFind
-
-let primitiveTypeReaders isLegacy = 
-    supportedTypeMappings isLegacy
-    |> List.map(fun (_, clrType, _, readerMethod) ->
-        { PrimitiveTypeReader.ClrType = clrType; PrimitiveTypeReader.ReaderMethod = readerMethod }
-    )
-    |> List.distinctBy (fun ptr -> ptr.ClrType)

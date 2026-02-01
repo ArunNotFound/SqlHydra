@@ -32,79 +32,29 @@ let yesNo(title: string) =
     else AnsiConsole.MarkupLine($"{title} [red]{answer}[/]")
     answer = "Yes"
 
-type UseCase = 
-    | SqlHydraQueryIntegration
-    | OtherDataLibrary
-    | Standalone
-    override this.ToString() = // Selection prompts:
-        match this with 
-        | SqlHydraQueryIntegration -> "SqlHydra.Query integration (default)"
-        | OtherDataLibrary -> "Other data library"
-        | Standalone -> "Standalone"
-        
-let multiSelectDU<'T> (title: string) (options: 'T seq) = 
-    let selection = SelectionPrompt<'T>()
-    selection.Title <- title
-    selection.UseConverter(fun item -> item.ToString()) |> ignore
-    selection.AddChoices options |> ignore
-    let answer = AnsiConsole.Prompt(selection)
-    AnsiConsole.MarkupLine($"{title} [green]{answer}[/]")
-    answer
-
 /// Presents a series of user prompts to create a new config file.
-let newConfigWizard (args: Args) = 
-    let provider = args.Provider
-    let connection = 
+let newConfigWizard (args: Args) =
+    let connection =
         let cn = AnsiConsole.Ask<string>("[blue]-[/] Enter a database [green]Connection String[/]:")
         cn.Replace(@"\\", @"\") // Fix if user copies an escaped backslash from an existing config
     let outputFile = AnsiConsole.Ask<string>("[blue]-[/] Enter an [green]Output Filename[/] (Ex: [yellow]AdventureWorks.fs[/]):")
     let ns = AnsiConsole.Ask<string>("[blue]-[/] Enter a [green]Namespace[/] (Ex: [yellow]MyApp.AdventureWorks[/]):")
-    let useCase = multiSelectDU<UseCase> "[blue]-[/] Select a use case:" [ SqlHydraQueryIntegration; OtherDataLibrary; Standalone ]
-    let config = 
-        match useCase with 
-        | SqlHydraQueryIntegration -> 
-            { 
-                Config.ConnectionString = connection
-                Config.OutputFile = outputFile
-                Config.Namespace = ns
-                Config.IsCLIMutable = true
-                Config.IsMutableProperties = false
-                Config.NullablePropertyType = NullablePropertyType.Option
-                Config.ProviderDbTypeAttributes = true
-                Config.TableDeclarations = true
-                Config.Readers = Some { ReadersConfig.ReaderType = provider.DefaultReaderType } 
-                Config.Filters = Filters.Empty // User must manually configure filter in .toml file
-            }
-        | OtherDataLibrary -> 
-            { 
-                Config.ConnectionString = connection
-                Config.OutputFile = outputFile
-                Config.Namespace = ns
-                Config.IsCLIMutable = true
-                Config.IsMutableProperties = false
-                Config.NullablePropertyType = NullablePropertyType.Option
-                Config.ProviderDbTypeAttributes = false
-                Config.TableDeclarations = false
-                Config.Readers = None 
-                Config.Filters = Filters.Empty // User must manually configure filter in .toml file
-            }
-        | Standalone -> 
-            { 
-                Config.ConnectionString = connection
-                Config.OutputFile = outputFile
-                Config.Namespace = ns
-                Config.IsCLIMutable = true
-                Config.IsMutableProperties = false
-                Config.NullablePropertyType = NullablePropertyType.Option
-                Config.ProviderDbTypeAttributes = false
-                Config.TableDeclarations = false
-                Config.Readers = Some { ReadersConfig.ReaderType = provider.DefaultReaderType } 
-                Config.Filters = Filters.Empty // User must manually configure filter in .toml file
-            }
+    let config =
+        {
+            Config.ConnectionString = connection
+            Config.OutputFile = outputFile
+            Config.Namespace = ns
+            Config.IsCLIMutable = true
+            Config.IsMutableProperties = false
+            Config.NullablePropertyType = NullablePropertyType.Option
+            Config.ProviderDbTypeAttributes = true
+            Config.TableDeclarations = true
+            Config.Readers = None
+            Config.Filters = Filters.Empty // User must manually configure filter in .toml file
+        }
 
     AnsiConsole.MarkupLine($"[green]-[/] {args.TomlFile.Name} has been created!")
-    if config.Readers <> None then AnsiConsole.MarkupLine($"[green]-[/] Please install the `{provider.DefaultProvider}` NuGet package in your project.")
-    if useCase = SqlHydraQueryIntegration then AnsiConsole.MarkupLine($"[green]-[/] Please install the `SqlHydra.Query` NuGet package in your project.")
+    AnsiConsole.MarkupLine($"[green]-[/] Please install the `SqlHydra.Query` NuGet package in your project.")
     config
 
 /// Saves a config as toml.
@@ -136,8 +86,6 @@ let printConfig (cfg: Config) =
     AnsiConsole.MarkupLine($"[blue]-[/] Nullable Property Type: [deepskyblue1]\"{cfg.NullablePropertyType}\"[/]")
     AnsiConsole.MarkupLine($"[blue]-[/] Provider DB Type Attributes: [deepskyblue1]{cfg.ProviderDbTypeAttributes}[/]")
     AnsiConsole.MarkupLine($"[blue]-[/] Table Declarations: [deepskyblue1]{cfg.TableDeclarations}[/]")
-    let readers = cfg.Readers |> Option.map (fun r -> r.ReaderType) |> Option.defaultValue "HydraReader Feature Disabled"
-    AnsiConsole.MarkupLine($"[blue]-[/] Readers: [deepskyblue1]\"{readers}\"[/]")
     // Filters are printed in SchemaFilters.fs
 
 let printLegacyStatus (isLegacy: bool) = 
@@ -166,12 +114,7 @@ let getOrCreateConfig (args: Args) =
 open Fantomas.Core
 
 let formatCodeWithFantomas (code: string) =
-    let cfg = 
-        { FormatConfig.Default with 
-            FormatConfig.MaxIfThenElseShortWidth = 400           // Forces ReadIfNotNull if/then to be on a single line
-            FormatConfig.MaxValueBindingWidth = 400              // Ensure reader property/column bindings stay on one line
-            FormatConfig.MaxLineLength = 400                     // Ensure reader property/column bindings stay on one line
-        }
+    let cfg = FormatConfig.Default
 
     CodeFormatter.FormatDocumentAsync(false, code, cfg) 
     |> Async.RunSynchronously
@@ -193,11 +136,11 @@ let run (args: Args) =
     // Ensure the output directory exists (`cfg.OutputFile` may contain subdirectories).
     outputFile.Directory.Create()
 
-    let generatedCode = 
+    let generatedCode =
         let isLegacy = Fsproj.targetsLegacyFramework args.Project
         printLegacyStatus isLegacy
         let schema = args.Provider.GetSchema(cfg, isLegacy)
-        SchemaTemplate.generate cfg args.Provider schema args.Version isLegacy
+        SchemaTemplate.generate cfg args.Provider schema args.Version
         |> formatCodeWithFantomas
         
 

@@ -94,8 +94,7 @@ let getSchema (cfg: Config, isLegacy: bool) : Schema =
         )
         |> Seq.toList
 
-    { 
+    {
         Tables = tables
         Enums = []
-        PrimitiveTypeReaders = SqliteDataTypes.primitiveTypeReaders isLegacy
     }

@@ -551,23 +551,29 @@ type SelectQueryBuilder<'Selected, 'Mapped> () =
 
 
 /// A select builder that returns a Task result.
-type SelectTaskBuilder<'Selected, 'Mapped, 'Reader & #DbDataReader> (
-    readEntityBuilder: 'Reader -> (unit -> 'Selected), ct: ContextType, cancellationToken: CancellationToken) =
+type SelectTaskBuilder<'Selected, 'Mapped> (ct: ContextType, cancellationToken: CancellationToken) =
     inherit SelectBuilder<'Selected, 'Mapped>()
 
-    /// The generic HydraReader.Read method, set by generated code for selectExpr support.
-    member val GenericReadMethod: System.Reflection.MethodInfo option = None with get, set
-
-    new(readEntityBuilder, ct) = SelectTaskBuilder(readEntityBuilder, ct, CancellationToken.None)
+    new(ct) = SelectTaskBuilder(ct, CancellationToken.None)
 
     member this.RunSelected(query: Query, resultModifier) =
         task {
             let! ctx = ContextUtils.getContext ct
-            try 
-                let selectQuery = SelectQuery<'Selected>(query)
-                let! results = ctx.ReadAsyncWithOptions (selectQuery, readEntityBuilder, cancellationToken)
-                return results |> resultModifier
-            finally 
+            try
+                use cmd = ctx.BuildCommand(query)
+                use! reader = cmd.ExecuteReaderAsync(cancellationToken)
+                let readEntity = Hydration.buildRowReader<'Selected> reader
+                let results = ResizeArray<'Selected>()
+
+                let! hasMore = reader.ReadAsync(cancellationToken)
+                let mutable hasMore = hasMore
+                while hasMore && not cancellationToken.IsCancellationRequested do
+                    results.Add(readEntity())
+                    let! hasMore' = reader.ReadAsync(cancellationToken)
+                    hasMore <- hasMore'
+
+                return results :> seq<'Selected> |> resultModifier
+            finally
                 ContextUtils.disposeIfNotShared ct ctx
         }
 
@@ -575,9 +581,19 @@ type SelectTaskBuilder<'Selected, 'Mapped, 'Reader & #DbDataReader> (
         task {
             let! ctx = ContextUtils.getContext ct
             try
-                let selectQuery = SelectQuery<'Selected>(query)
-                let! results = ctx.ReadAsyncWithOptions (selectQuery, readEntityBuilder, cancellationToken)
-                return results |> Seq.map this.MapFn.Value.Invoke |> resultModifier
+                use cmd = ctx.BuildCommand(query)
+                use! reader = cmd.ExecuteReaderAsync(cancellationToken)
+                let readEntity = Hydration.buildRowReader<'Selected> reader
+                let results = ResizeArray<'Mapped>()
+
+                let! hasMore = reader.ReadAsync(cancellationToken)
+                let mutable hasMore = hasMore
+                while hasMore && not cancellationToken.IsCancellationRequested do
+                    results.Add(this.MapFn.Value.Invoke(readEntity()))
+                    let! hasMore' = reader.ReadAsync(cancellationToken)
+                    hasMore <- hasMore'
+
+                return results :> seq<'Mapped> |> resultModifier
             finally
                 ContextUtils.disposeIfNotShared ct ctx
         }
@@ -588,22 +604,13 @@ type SelectTaskBuilder<'Selected, 'Mapped, 'Reader & #DbDataReader> (
             try
                 use cmd = ctx.BuildCommand(query)
                 use! reader = cmd.ExecuteReaderAsync(cancellationToken)
-
-                // Reflectively call HydraReader.Read<LeafTupleType>(reader)
-                let readMethod = this.GenericReadMethod.Value.MakeGenericMethod(exprInfo.LeafTupleType)
-                let readerFnObj = readMethod.Invoke(null, [| reader |])
-                let invokeMethod = readerFnObj.GetType().GetMethod("Invoke")
-                let readRow () = invokeMethod.Invoke(readerFnObj, [| () :> obj |])
+                let readRow = Hydration.buildSelectExprReader reader exprInfo
 
                 let results = ResizeArray<'Selected>()
                 let! hasMore = reader.ReadAsync(cancellationToken)
                 let mutable hasMore = hasMore
                 while hasMore do
-                    let row = readRow()
-                    let fields =
-                        if FSharp.Reflection.FSharpType.IsTuple(exprInfo.LeafTupleType)
-                        then FSharp.Reflection.FSharpValue.GetTupleFields(row)
-                        else [| row |]
+                    let fields = readRow()
                     let result = exprInfo.CompiledMapper.Invoke(fields) :?> 'Selected
                     results.Add(result)
                     let! hasMore' = reader.ReadAsync(cancellationToken)
@@ -620,21 +627,13 @@ type SelectTaskBuilder<'Selected, 'Mapped, 'Reader & #DbDataReader> (
             try
                 use cmd = ctx.BuildCommand(query)
                 use! reader = cmd.ExecuteReaderAsync(cancellationToken)
-
-                let readMethod = this.GenericReadMethod.Value.MakeGenericMethod(exprInfo.LeafTupleType)
-                let readerFnObj = readMethod.Invoke(null, [| reader |])
-                let invokeMethod = readerFnObj.GetType().GetMethod("Invoke")
-                let readRow () = invokeMethod.Invoke(readerFnObj, [| () :> obj |])
+                let readRow = Hydration.buildSelectExprReader reader exprInfo
 
                 let results = ResizeArray<'Mapped>()
                 let! hasMore = reader.ReadAsync(cancellationToken)
                 let mutable hasMore = hasMore
                 while hasMore do
-                    let row = readRow()
-                    let fields =
-                        if FSharp.Reflection.FSharpType.IsTuple(exprInfo.LeafTupleType)
-                        then FSharp.Reflection.FSharpValue.GetTupleFields(row)
-                        else [| row |]
+                    let fields = readRow()
                     let selected = exprInfo.CompiledMapper.Invoke(fields) :?> 'Selected
                     results.Add(this.MapFn.Value.Invoke(selected))
                     let! hasMore' = reader.ReadAsync(cancellationToken)
@@ -717,21 +716,27 @@ type SelectTaskBuilder<'Selected, 'Mapped, 'Reader & #DbDataReader> (
 
 
 /// A select builder that returns an Async result.
-type SelectAsyncBuilder<'Selected, 'Mapped, 'Reader & #DbDataReader> (
-    readEntityBuilder: 'Reader -> (unit -> 'Selected), ct: ContextType) =
+type SelectAsyncBuilder<'Selected, 'Mapped> (ct: ContextType) =
     inherit SelectBuilder<'Selected, 'Mapped>()
-
-    /// The generic HydraReader.Read method, set by generated code for selectExpr support.
-    member val GenericReadMethod: System.Reflection.MethodInfo option = None with get, set
 
     member this.RunSelected(query: Query, resultModifier) =
         async {
             let! ctx = ContextUtils.getContext ct |> Async.AwaitTask
             try
-                let selectQuery = SelectQuery<'Selected>(query)
+                use cmd = ctx.BuildCommand(query)
                 let! cancel = Async.CancellationToken
-                let! results = ctx.ReadAsyncWithOptions (selectQuery, readEntityBuilder, cancel) |> Async.AwaitTask
-                return results |> resultModifier
+                use! reader = cmd.ExecuteReaderAsync(cancel) |> Async.AwaitTask
+                let readEntity = Hydration.buildRowReader<'Selected> (reader :?> DbDataReader)
+                let results = ResizeArray<'Selected>()
+
+                let! hasMore = reader.ReadAsync(cancel) |> Async.AwaitTask
+                let mutable hasMore = hasMore
+                while hasMore && not cancel.IsCancellationRequested do
+                    results.Add(readEntity())
+                    let! hasMore' = reader.ReadAsync(cancel) |> Async.AwaitTask
+                    hasMore <- hasMore'
+
+                return results :> seq<'Selected> |> resultModifier
             finally
                 ContextUtils.disposeIfNotShared ct ctx
         }
@@ -740,10 +745,20 @@ type SelectAsyncBuilder<'Selected, 'Mapped, 'Reader & #DbDataReader> (
         async {
             let! ctx = ContextUtils.getContext ct |> Async.AwaitTask
             try
-                let selectQuery = SelectQuery<'Selected>(query)
+                use cmd = ctx.BuildCommand(query)
                 let! cancel = Async.CancellationToken
-                let! results = ctx.ReadAsyncWithOptions (selectQuery, readEntityBuilder, cancel) |> Async.AwaitTask
-                return results |> Seq.map this.MapFn.Value.Invoke |> resultModifier
+                use! reader = cmd.ExecuteReaderAsync(cancel) |> Async.AwaitTask
+                let readEntity = Hydration.buildRowReader<'Selected> (reader :?> DbDataReader)
+                let results = ResizeArray<'Mapped>()
+
+                let! hasMore = reader.ReadAsync(cancel) |> Async.AwaitTask
+                let mutable hasMore = hasMore
+                while hasMore && not cancel.IsCancellationRequested do
+                    results.Add(this.MapFn.Value.Invoke(readEntity()))
+                    let! hasMore' = reader.ReadAsync(cancel) |> Async.AwaitTask
+                    hasMore <- hasMore'
+
+                return results :> seq<'Mapped> |> resultModifier
             finally
                 ContextUtils.disposeIfNotShared ct ctx
         }
@@ -754,28 +769,19 @@ type SelectAsyncBuilder<'Selected, 'Mapped, 'Reader & #DbDataReader> (
             try
                 use cmd = ctx.BuildCommand(query)
                 let! cancel = Async.CancellationToken
-                let! reader = cmd.ExecuteReaderAsync(cancel) |> Async.AwaitTask
-
-                let readMethod = this.GenericReadMethod.Value.MakeGenericMethod(exprInfo.LeafTupleType)
-                let readerFnObj = readMethod.Invoke(null, [| reader |])
-                let invokeMethod = readerFnObj.GetType().GetMethod("Invoke")
-                let readRow () = invokeMethod.Invoke(readerFnObj, [| () :> obj |])
+                use! reader = cmd.ExecuteReaderAsync(cancel) |> Async.AwaitTask
+                let readRow = Hydration.buildSelectExprReader (reader :?> DbDataReader) exprInfo
 
                 let results = ResizeArray<'Selected>()
                 let! hasMore = reader.ReadAsync(cancel) |> Async.AwaitTask
                 let mutable hasMore = hasMore
                 while hasMore do
-                    let row = readRow()
-                    let fields =
-                        if FSharp.Reflection.FSharpType.IsTuple(exprInfo.LeafTupleType)
-                        then FSharp.Reflection.FSharpValue.GetTupleFields(row)
-                        else [| row |]
+                    let fields = readRow()
                     let result = exprInfo.CompiledMapper.Invoke(fields) :?> 'Selected
                     results.Add(result)
                     let! hasMore' = reader.ReadAsync(cancel) |> Async.AwaitTask
                     hasMore <- hasMore'
 
-                reader.Dispose()
                 return results :> seq<'Selected> |> resultModifier
             finally
                 ContextUtils.disposeIfNotShared ct ctx
@@ -787,28 +793,19 @@ type SelectAsyncBuilder<'Selected, 'Mapped, 'Reader & #DbDataReader> (
             try
                 use cmd = ctx.BuildCommand(query)
                 let! cancel = Async.CancellationToken
-                let! reader = cmd.ExecuteReaderAsync(cancel) |> Async.AwaitTask
-
-                let readMethod = this.GenericReadMethod.Value.MakeGenericMethod(exprInfo.LeafTupleType)
-                let readerFnObj = readMethod.Invoke(null, [| reader |])
-                let invokeMethod = readerFnObj.GetType().GetMethod("Invoke")
-                let readRow () = invokeMethod.Invoke(readerFnObj, [| () :> obj |])
+                use! reader = cmd.ExecuteReaderAsync(cancel) |> Async.AwaitTask
+                let readRow = Hydration.buildSelectExprReader (reader :?> DbDataReader) exprInfo
 
                 let results = ResizeArray<'Mapped>()
                 let! hasMore = reader.ReadAsync(cancel) |> Async.AwaitTask
                 let mutable hasMore = hasMore
                 while hasMore do
-                    let row = readRow()
-                    let fields =
-                        if FSharp.Reflection.FSharpType.IsTuple(exprInfo.LeafTupleType)
-                        then FSharp.Reflection.FSharpValue.GetTupleFields(row)
-                        else [| row |]
+                    let fields = readRow()
                     let selected = exprInfo.CompiledMapper.Invoke(fields) :?> 'Selected
                     results.Add(this.MapFn.Value.Invoke(selected))
                     let! hasMore' = reader.ReadAsync(cancel) |> Async.AwaitTask
                     hasMore <- hasMore'
 
-                reader.Dispose()
                 return results :> seq<'Mapped> |> resultModifier
             finally
                 ContextUtils.disposeIfNotShared ct ctx
@@ -890,31 +887,25 @@ type SelectAsyncBuilder<'Selected, 'Mapped, 'Reader & #DbDataReader> (
 let select<'Selected, 'Mapped> =
     SelectQueryBuilder<'Selected, 'Mapped>()
 
-/// Builds a select query with a HydraReader.Read function and context source - returns an Async query result
-let inline selectAsync< ^Selected, ^Mapped, 'Reader, ^Context
-    when 'Reader :> DbDataReader
-    and (ContextTypeResolver.Resolver or ^Context) : (static member ($) : ContextTypeResolver.Resolver * ^Context -> ContextType)>
-    (readEntityBuilder: 'Reader -> (unit -> ^Selected))
+/// Builds a select query with a context source - returns an Async query result
+let inline selectAsync< ^Selected, ^Mapped, ^Context
+    when (ContextTypeResolver.Resolver or ^Context) : (static member ($) : ContextTypeResolver.Resolver * ^Context -> ContextType)>
     (ctSource: ^Context) =
     let ct = ContextTypeResolver.resolve ctSource
-    SelectAsyncBuilder< ^Selected, ^Mapped, 'Reader>(readEntityBuilder, ct)
+    SelectAsyncBuilder< ^Selected, ^Mapped>(ct)
 
-/// Builds a select query with a HydraReader.Read function and context source - returns a Task query result
-let inline selectTask< ^Selected, ^Mapped, 'Reader, ^Context
-    when 'Reader :> DbDataReader
-    and (ContextTypeResolver.Resolver or ^Context) : (static member ($) : ContextTypeResolver.Resolver * ^Context -> ContextType)>
-    (readEntityBuilder: 'Reader -> (unit -> ^Selected))
+/// Builds a select query with a context source - returns a Task query result
+let inline selectTask< ^Selected, ^Mapped, ^Context
+    when (ContextTypeResolver.Resolver or ^Context) : (static member ($) : ContextTypeResolver.Resolver * ^Context -> ContextType)>
     (ctSource: ^Context) =
     let ct = ContextTypeResolver.resolve ctSource
-    SelectTaskBuilder< ^Selected, ^Mapped, 'Reader>(readEntityBuilder, ct)
+    SelectTaskBuilder< ^Selected, ^Mapped>(ct)
 
-/// Builds a select query with a HydraReader.Read function, context source, and CancellationToken - returns a Task query result
-let inline selectTaskCancellable< ^Selected, ^Mapped, 'Reader, ^Context
-    when 'Reader :> DbDataReader
-    and (ContextTypeResolver.Resolver or ^Context) : (static member ($) : ContextTypeResolver.Resolver * ^Context -> ContextType)>
-    (readEntityBuilder: 'Reader -> (unit -> ^Selected))
+/// Builds a select query with a context source and CancellationToken - returns a Task query result
+let inline selectTaskCancellable< ^Selected, ^Mapped, ^Context
+    when (ContextTypeResolver.Resolver or ^Context) : (static member ($) : ContextTypeResolver.Resolver * ^Context -> ContextType)>
     (ctSource: ^Context)
     (cancellationToken: CancellationToken) =
     let ct = ContextTypeResolver.resolve ctSource
-    SelectTaskBuilder< ^Selected, ^Mapped, 'Reader>(readEntityBuilder, ct, cancellationToken)
+    SelectTaskBuilder< ^Selected, ^Mapped>(ct, cancellationToken)
 
