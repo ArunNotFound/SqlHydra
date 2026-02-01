@@ -204,8 +204,9 @@ let ``selectExpr - leftJoin - provenance`` () = task {
                 |> fun text -> text.Replace("Order:", "ORDER:")
             )
             take 10
+            toArray
         }
 
-    results |> Seq.iter (printf "%s")
+    results |> Array.iter (printf "%s")
     gt0 results
 }
