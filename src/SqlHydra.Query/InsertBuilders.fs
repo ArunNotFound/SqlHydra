@@ -13,6 +13,8 @@ type InsertBuilder<'Inserted, 'InsertReturn>() =
         | :? QuerySource<'T, InsertQuerySpec<'T, 'IdentityReturn>> as qs -> qs.Query
         | _ -> InsertQuerySpec.Default
 
+    member val CancellationToken = CancellationToken.None with get, set
+
     member this.For (state: QuerySource<'T>, [<ReflectedDefinition>] forExpr: FSharp.Quotations.Expr<'T -> QuerySource<'T>>) =        
         let query = state |> getQueryOrDefault
         let tableAlias = QuotationVisitor.visitFor forExpr |> QuotationVisitor.allowUnderscore false
@@ -89,6 +91,12 @@ type InsertBuilder<'Inserted, 'InsertReturn>() =
         
         QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>({ spec with IdentityField = Some prop.Name }, state.TableMappings)
 
+    /// Sets a CancellationToken for the query execution.
+    [<CustomOperation("cancel", MaintainsVariableSpace = true)>]
+    member this.Cancel (state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>, cancellationToken: CancellationToken) =
+        this.CancellationToken <- cancellationToken
+        state
+
     member this.Run (state: QuerySource<'Inserted>) =
         let spec = getQueryOrDefault state
         InsertQuery<'Inserted, 'InsertReturn>(spec)
@@ -103,7 +111,8 @@ type InsertAsyncBuilder<'Inserted, 'InsertReturn>(ct: ContextType) =
             let! ctx = ContextUtils.getContext ct |> Async.AwaitTask 
             try 
                 let insertQuery = InsertQuery<'Inserted, 'InsertReturn>(state.Query)
-                let! cancel = Async.CancellationToken
+                let! asyncCancel = Async.CancellationToken
+                let cancel = if this.CancellationToken <> CancellationToken.None then this.CancellationToken else asyncCancel
                 if state.Query.Entities |> Seq.isEmpty then
                     return Unchecked.defaultof<'InsertReturn>
                 else
@@ -115,22 +124,20 @@ type InsertAsyncBuilder<'Inserted, 'InsertReturn>(ct: ContextType) =
 
 
 /// An insert builder that returns an Async result.
-type InsertTaskBuilder<'Inserted, 'InsertReturn>(ct: ContextType, cancellationToken: CancellationToken) =
+type InsertTaskBuilder<'Inserted, 'InsertReturn>(ct: ContextType) =
     inherit InsertBuilder<'Inserted, 'InsertReturn>()
-    
-    new(ct) = InsertTaskBuilder(ct, CancellationToken.None)
 
-    member this.Run (state: QuerySource<'Inserted, InsertQuerySpec<'Inserted, 'InsertReturn>>) = 
+    member this.Run (state: QuerySource<'Inserted, InsertQuerySpec<'Inserted, 'InsertReturn>>) =
         task {
             let! ctx = ContextUtils.getContext ct
-            try 
+            try
                 let insertQuery = InsertQuery<'Inserted, 'InsertReturn>(state.Query)
                 if state.Query.Entities |> Seq.isEmpty then
                     return Unchecked.defaultof<'InsertReturn>
                 else
-                    let! insertReturn = ctx.InsertAsyncWithOptions (insertQuery, cancellationToken)
+                    let! insertReturn = ctx.InsertAsyncWithOptions (insertQuery, this.CancellationToken)
                     return insertReturn
-            finally 
+            finally
                 ContextUtils.disposeIfNotShared ct ctx
         }
 
@@ -147,6 +154,3 @@ let insertAsync<'Inserted, 'InsertReturn> ct =
 let insertTask<'Inserted, 'InsertReturn> ct = 
     InsertTaskBuilder<'Inserted, 'InsertReturn>(ct)
     
-/// Builds an insert query with a CancellationToken - returns a Task result
-let insertTaskCancellable<'Inserted, 'InsertReturn> ct cancellationToken =
-    InsertTaskBuilder<'Inserted, 'InsertReturn>(ct, cancellationToken)

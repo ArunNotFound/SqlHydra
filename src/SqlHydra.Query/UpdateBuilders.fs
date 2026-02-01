@@ -13,11 +13,13 @@ let private prepareUpdateQuery<'Updated, 'UpdateReturn> (spec: UpdateQuerySpec<'
 
 /// The base update builder that contains all common operations
 type UpdateBuilder<'Updated, 'UpdateReturn>() =
-    
+
     let getQueryOrDefault (state: QuerySource<'T>) =
         match state with
         | :? QuerySource<'T, UpdateQuerySpec<'T, 'UpdateReturn>> as qs -> qs.Query
         | _ -> UpdateQuerySpec.Default
+
+    member val CancellationToken = CancellationToken.None with get, set
 
     member this.For (state: QuerySource<'T>, [<ReflectedDefinition>] forExpr: FSharp.Quotations.Expr<'T -> QuerySource<'T>>) =
         let query = state |> getQueryOrDefault
@@ -92,6 +94,12 @@ type UpdateBuilder<'Updated, 'UpdateReturn>() =
             invalidOp "Cannot have `updateAll` clause in a query where `where` has been used."
         QuerySource<'T, UpdateQuerySpec<'T, 'UpdateReturn>>({ query with UpdateAll = true; Where = None }, state.TableMappings)
 
+    /// Sets a CancellationToken for the query execution.
+    [<CustomOperation("cancel", MaintainsVariableSpace = true)>]
+    member this.Cancel (state: QuerySource<'T, UpdateQuerySpec<'T, 'UpdateReturn>>, cancellationToken: CancellationToken) =
+        this.CancellationToken <- cancellationToken
+        state
+
     /// Unwraps the query
     member this.Run (state: QuerySource<'Updated>) =
         state |> getQueryOrDefault |> prepareUpdateQuery
@@ -106,7 +114,8 @@ type UpdateAsyncBuilder<'Updated, 'UpdateReturn>(ct: ContextType) =
             let updateQuery = state.Query |> prepareUpdateQuery
             let! ctx = ContextUtils.getContext ct |> Async.AwaitTask
             try
-                let! cancel = Async.CancellationToken
+                let! asyncCancel = Async.CancellationToken
+                let cancel = if this.CancellationToken <> CancellationToken.None then this.CancellationToken else asyncCancel
                 let! result = ctx.UpdateAsyncWithOptions (updateQuery, cancel) |> Async.AwaitTask
                 return result
             finally 
@@ -115,19 +124,17 @@ type UpdateAsyncBuilder<'Updated, 'UpdateReturn>(ct: ContextType) =
 
 
 /// An update builder that returns a Task result.
-type UpdateTaskBuilder<'Updated, 'UpdateReturn>(ct: ContextType, cancellationToken: CancellationToken) =
+type UpdateTaskBuilder<'Updated, 'UpdateReturn>(ct: ContextType) =
     inherit UpdateBuilder<'Updated, 'UpdateReturn>()
-    
-    new(ct) = UpdateTaskBuilder(ct, CancellationToken.None)
 
-    member this.Run (state: QuerySource<'Updated, UpdateQuerySpec<'Updated, 'UpdateReturn>>) = 
+    member this.Run (state: QuerySource<'Updated, UpdateQuerySpec<'Updated, 'UpdateReturn>>) =
         task {
             let updateQuery = state.Query |> prepareUpdateQuery
             let! ctx = ContextUtils.getContext ct
             try
-                let! result = ctx.UpdateAsyncWithOptions (updateQuery, cancellationToken) |> Async.AwaitTask
+                let! result = ctx.UpdateAsyncWithOptions (updateQuery, this.CancellationToken) |> Async.AwaitTask
                 return result
-            finally 
+            finally
                 ContextUtils.disposeIfNotShared ct ctx
         }
 
@@ -144,7 +151,4 @@ let updateAsync<'Updated, 'UpdateReturn> ct =
 let updateTask<'Updated, 'UpdateReturn> ct = 
     UpdateTaskBuilder<'Updated, 'UpdateReturn>(ct)
     
-/// Builds an update query with a QueryContext and CancellationToken - returns a Task result
-let updateTaskCancellable<'Updated, 'UpdateReturn> ct cancellationToken = 
-    UpdateTaskBuilder<'Updated, 'UpdateReturn>(ct, cancellationToken)
     
