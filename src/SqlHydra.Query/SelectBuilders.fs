@@ -176,9 +176,10 @@ type SelectBuilder<'Selected, 'Mapped> () =
 
         QuerySource<'Selected, Query>(queryWithSelectedColumns, state.TableMappings)
 
+    /// Future v4.0 enhancement.
     /// Sets the SELECT statement using an arbitrary F# expression.
     /// Supports string interpolation, conditionals, and other F# expressions that reference DB columns.
-    //[<CustomOperation("selectExpr", MaintainsVariableSpace = true, AllowIntoPattern = true)>]
+    //[<CustomOperation("select", MaintainsVariableSpace = true, AllowIntoPattern = true)>]
     //member this.SelectExpr (state: QuerySource<'T, Query>, [<ProjectionParameter>] selectExpression: Expression<Func<'T, 'Selected>>) =
     //    let exprInfo = LinqExpressionVisitors.visitSelectExpr<'T, 'Selected> selectExpression
 

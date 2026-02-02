@@ -19,10 +19,6 @@ open SqlServer.AdventureWorksNet10
 #endif
 open Microsoft.SqlServer.Types
 
-
-let openContext() = 
-    db.OpenContext()
-
 let stubbedErrorLog = 
     {
         dbo.ErrorLog.ErrorLogID = 0 // Exclude
@@ -39,7 +35,7 @@ let stubbedErrorLog =
 [<Test>]
 let ``Where City Starts With S``() = task {
     let! addresses =
-        selectTask openContext {
+        selectTask db {
             for a in Person.Address do
             where (a.City |=| [ "Seattle"; "Santa Cruz" ])
         }
@@ -51,7 +47,7 @@ let ``Where City Starts With S``() = task {
 [<Test>]
 let ``Select City Column Where City Starts with S``() = task {
     let! cities =
-        selectTask openContext {
+        selectTask db {
             for a in Person.Address do
             where (a.City =% "S%")
             select a.City
@@ -64,7 +60,7 @@ let ``Select City Column Where City Starts with S``() = task {
 [<Test>]
 let ``Inner Join Orders-Details``() = task {
     let! results =
-        selectTask openContext {
+        selectTask db {
             for o in Sales.SalesOrderHeader do
             join d in Sales.SalesOrderDetail on (o.SalesOrderID = d.SalesOrderID)
             where o.OnlineOrderFlag
@@ -77,7 +73,7 @@ let ``Inner Join Orders-Details``() = task {
 [<Test>]
 let ``Product with Category Name``() = task {
     let! rows =
-        selectTask openContext {
+        selectTask db {
             for p in Production.Product do
             join sc in Production.ProductSubcategory on (p.ProductSubcategoryID = Some sc.ProductSubcategoryID)
             join c in Production.ProductCategory on (sc.ProductCategoryID = c.ProductCategoryID)
@@ -91,7 +87,7 @@ let ``Product with Category Name``() = task {
 [<Test>]
 let ``Select Column Aggregates From Product IDs 1-3``() = task {
     let! aggregates =
-        selectTask openContext {
+        selectTask db {
             for p in Production.Product do
             where (p.ProductSubcategoryID <> None)
             groupBy p.ProductSubcategoryID
@@ -120,7 +116,7 @@ let ``Aggregate Subquery One``() = task {
         }
 
     let! productsWithHigherThanAvgPrice =
-        selectTask openContext {
+        selectTask db {
             for p in Production.Product do
             where (p.ListPrice > subqueryOne avgListPrice)
             orderByDescending p.ListPrice
@@ -136,7 +132,7 @@ let ``Aggregate Subquery One``() = task {
 [<Test>]
 let ``Select Column Aggregates``() = task {
     let! aggregates =
-        selectTask openContext {
+        selectTask db {
             for p in Production.Product do
             where (p.ProductSubcategoryID <> None)
             groupBy p.ProductSubcategoryID
@@ -150,7 +146,7 @@ let ``Select Column Aggregates``() = task {
 [<Test>]
 let ``Sorted Aggregates - Top 5 categories with highest avg price products``() = task {
     let! aggregates =
-        selectTask openContext {
+        selectTask db {
             for p in Production.Product do
             where (p.ProductSubcategoryID <> None)
             groupBy p.ProductSubcategoryID
@@ -175,7 +171,7 @@ let ``Where subqueryMany``() = task {
         }
 
     let! top5Categories =
-        selectTask openContext {
+        selectTask db {
             for c in Production.ProductCategory do
             where (Some c.ProductCategoryID |=| subqueryMany top5CategoryIdsWithHighestAvgPrices)
             select c.Name
@@ -193,7 +189,7 @@ let ``Where subqueryOne``() = task {
         }
 
     let! productsWithAboveAveragePrice =
-        selectTask openContext {
+        selectTask db {
             for p in Production.Product do
             where (p.ListPrice > subqueryOne avgListPrice)
             select (p.Name, p.ListPrice)
@@ -205,7 +201,7 @@ let ``Where subqueryOne``() = task {
 [<Test>]
 let ``Select Columns with Option``() = task {
     let! values =
-        selectTask openContext {
+        selectTask db {
             for p in Production.Product do
             where (p.ProductSubcategoryID <> None)
             select (p.ProductSubcategoryID, p.ListPrice)
@@ -217,8 +213,8 @@ let ``Select Columns with Option``() = task {
 
 [<Test>]
 let ``Insert with Output``() = task {
-    use ctx = openContext()
-    ctx.BeginTransaction()
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
 
     let now = DateTime.Now
 
@@ -235,7 +231,7 @@ let ``Insert with Output``() = task {
             dbo.ErrorLog.UserName = "jmarr"
         }
     let! (errorLogId, errorTime, errorLine) =
-        insertTask ctx {
+        insertTask shared {
             for e in dbo.ErrorLog do
             entity row
             excludeColumn e.ErrorLogID
@@ -246,16 +242,16 @@ let ``Insert with Output``() = task {
     (errorTime.Month, errorTime.Day, errorTime.Year) =! (now.Month, now.Day, now.Year)
     errorLine =! row.ErrorLine
 
-    ctx.RollbackTransaction()
+    shared.RollbackTransaction()
 }
 
 [<Test>]
 let ``Update with Output``() = task {
-    use ctx = openContext()
-    ctx.BeginTransaction()
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
 
     let! row = 
-        selectAsync ctx {
+        selectAsync shared {
             for e in dbo.ErrorLog do
             head
         }
@@ -275,7 +271,7 @@ let ``Update with Output``() = task {
         }
 
     let! (errorLogId, errorTime, errorLine) = 
-        updateTask ctx {
+        updateTask shared {
             for e in dbo.ErrorLog do
             entity row
             excludeColumn e.ErrorLogID
@@ -287,13 +283,11 @@ let ``Update with Output``() = task {
     (errorTime.Month, errorTime.Day, errorTime.Year) =! (now.Month, now.Day, now.Year)
     errorLine =! row.ErrorLine
 
-    ctx.RollbackTransaction()
+    shared.RollbackTransaction()
 }
 
 [<Test>]
 let ``InsertGetId Test``() = task {
-    use ctx = openContext()
-
     let errorLog = 
         {
             dbo.ErrorLog.ErrorLogID = 0 // Exclude
@@ -308,7 +302,7 @@ let ``InsertGetId Test``() = task {
         }
 
     let! errorLogId = 
-        insertTask ctx {
+        insertTask db {
             for e in dbo.ErrorLog do
             entity errorLog
             getId e.ErrorLogID
@@ -319,8 +313,6 @@ let ``InsertGetId Test``() = task {
 
 [<Test>]
 let ``InsertGetIdAsync Test``() = task {
-    use ctx = openContext()
-
     let errorLog = 
         {
             dbo.ErrorLog.ErrorLogID = 0 // Exclude
@@ -335,7 +327,7 @@ let ``InsertGetIdAsync Test``() = task {
         }
 
     let! result = 
-        insertTask ctx {
+        insertTask db {
             for e in dbo.ErrorLog do
             entity errorLog
             getId e.ErrorLogID
@@ -346,16 +338,16 @@ let ``InsertGetIdAsync Test``() = task {
 
 [<Test>]
 let ``Update Set Individual Fields``() = task {
-    use ctx = openContext()
+    use! shared = db.OpenContextAsync()
 
     let! row = 
-        selectAsync ctx {
+        selectAsync shared {
             for e in dbo.ErrorLog do
             head
         }
 
     let! result = 
-        updateTask ctx {
+        updateTask shared {
             for e in dbo.ErrorLog do
             set e.ErrorNumber 123
             set e.ErrorMessage "ERROR #123"
@@ -369,16 +361,16 @@ let ``Update Set Individual Fields``() = task {
 
 [<Test>]
 let ``UpdateAsync Set Individual Fields``() = task {
-    use ctx = openContext()
+    use! shared = db.OpenContextAsync()
 
     let! row = 
-        selectAsync ctx {
+        selectAsync shared {
             for e in dbo.ErrorLog do
             head
         }
 
     let! result = 
-        updateTask ctx {
+        updateTask shared {
             for e in dbo.ErrorLog do
             set e.ErrorNumber 123
             set e.ErrorMessage "ERROR #123"
@@ -392,10 +384,10 @@ let ``UpdateAsync Set Individual Fields``() = task {
 
 [<Test>]
 let ``Update Entity``() = task {
-    use ctx = openContext()
+    use! shared = db.OpenContextAsync()
 
     let! row = 
-        selectAsync ctx {
+        selectAsync shared {
             for e in dbo.ErrorLog do
             head
         }
@@ -413,7 +405,7 @@ let ``Update Entity``() = task {
         }
 
     let! result = 
-        updateTask ctx {
+        updateTask shared {
             for e in dbo.ErrorLog do
             entity errorLog
             excludeColumn e.ErrorLogID
@@ -425,8 +417,8 @@ let ``Update Entity``() = task {
 
 [<Test>]
 let ``Delete Test``() = task {
-    use ctx = openContext()
-    ctx.BeginTransaction()
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
 
     let errorLog =
         {
@@ -442,7 +434,7 @@ let ``Delete Test``() = task {
         }
 
     let! result =
-        insertTask ctx {
+        insertTask shared {
             for e in dbo.ErrorLog do
             entity errorLog
             getId e.ErrorLogID
@@ -451,26 +443,26 @@ let ``Delete Test``() = task {
     result >! 0
 
     let! rowId = 
-        selectAsync ctx {
+        selectAsync shared {
             for e in dbo.ErrorLog do
             select e.ErrorLogID
             head
         }
 
     let! result = 
-        deleteTask ctx {
+        deleteTask shared {
             for e in dbo.ErrorLog do
             where (e.ErrorLogID = rowId)
         }
 
     result =! 1
-    ctx.RollbackTransaction()
+    shared.RollbackTransaction()
 }
 
 [<Test>]
 let ``DeleteAsync Test``() = task {
-    use ctx = openContext()
-    ctx.BeginTransaction()
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
 
     let errorLog =
         {
@@ -486,7 +478,7 @@ let ``DeleteAsync Test``() = task {
         }
 
     let! result =
-        insertTask ctx {
+        insertTask shared {
             for e in dbo.ErrorLog do
             entity errorLog
             getId e.ErrorLogID
@@ -495,25 +487,25 @@ let ``DeleteAsync Test``() = task {
     result >! 0
 
     let! rowId = 
-        selectAsync ctx {
+        selectAsync shared {
             for e in dbo.ErrorLog do
             select e.ErrorLogID
             head
         }
 
     let! result = 
-        deleteTask ctx {
+        deleteTask shared {
             for e in dbo.ErrorLog do
             where (e.ErrorLogID = rowId)
         }
 
     result =! 1
-    ctx.RollbackTransaction()
+    shared.RollbackTransaction()
 }
 
 [<Test>]
 let ``Multiple Inserts``() = task {
-    use ctx = openContext()
+    use! ctx = db.OpenContextAsync()
 
     ctx.BeginTransaction()
 
@@ -557,12 +549,11 @@ let ``Multiple Inserts``() = task {
 
 [<Test>]
 let ``Distinct Test``() = task {
-    use ctx = openContext()
-
-    ctx.BeginTransaction()
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
 
     let! deletedCount = 
-        deleteAsync ctx {
+        deleteAsync shared {
             for e in dbo.ErrorLog do
             deleteAll
         } 
@@ -575,7 +566,7 @@ let ``Distinct Test``() = task {
     match errorLogs with
     | Some errorLogs ->            
         let! rowsInserted = 
-            insertAsync ctx {
+            insertAsync shared {
                 for e in dbo.ErrorLog do
                 entities errorLogs
                 excludeColumn e.ErrorLogID
@@ -585,13 +576,13 @@ let ``Distinct Test``() = task {
     | None -> ()
 
     let! results =
-        selectAsync ctx  {
+        selectAsync shared  {
             for e in dbo.ErrorLog do
             select e.ErrorNumber
         }
 
     let! distinctResults =
-        selectAsync ctx {
+        selectAsync shared {
             for e in dbo.ErrorLog do
             select e.ErrorNumber
             distinct
@@ -600,37 +591,12 @@ let ``Distinct Test``() = task {
     results |> Seq.length =! 3
     distinctResults |> Seq.length =! 1
 
-    ctx.RollbackTransaction()
+    shared.RollbackTransaction()
 }
 
 [<Test>]
 let ``Count Test``() = task {
-    use ctx = openContext()
-    ctx.BeginTransaction()
-
-    for i in [0..2] do
-        let! result = 
-            insertTask ctx {
-                for e in dbo.ErrorLog do
-                entity stubbedErrorLog
-                getId e.ErrorLogID
-            }
-        ()
-
-    let! count = 
-        select {
-            for e in dbo.ErrorLog do
-            count
-        }
-        |> ctx.CountAsync
-
-    count >! 0
-    ctx.RollbackTransaction()
-}
-
-[<Test>]
-let ``Count Test Task``() = task {
-    use ctx = openContext()
+    use! ctx = db.OpenContextAsync()
     ctx.BeginTransaction()
 
     for i in [0..2] do
@@ -651,15 +617,39 @@ let ``Count Test Task``() = task {
     count >! 0
     ctx.RollbackTransaction()
 }
+
+[<Test>]
+let ``Count Test Task``() = task {
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
+
+    for i in [0..2] do
+        let! result = 
+            insertTask shared {
+                for e in dbo.ErrorLog do
+                entity stubbedErrorLog
+                getId e.ErrorLogID
+            }
+        ()
+
+    let! count = 
+        selectTask shared {
+            for e in dbo.ErrorLog do
+            count
+        }
+
+    count >! 0
+    shared.RollbackTransaction()
+}
         
 [<Test>]
 let ``Count Test Async``() = task {
-    use ctx = openContext()
-    ctx.BeginTransaction()
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
         
     for i in [0..2] do
         let! result = 
-            insertAsync ctx {
+            insertAsync shared {
                 for e in dbo.ErrorLog do
                 entity stubbedErrorLog
                 getId e.ErrorLogID
@@ -667,13 +657,13 @@ let ``Count Test Async``() = task {
         ()
         
     let! count = 
-        selectAsync ctx {
+        selectAsync shared {
             for e in dbo.ErrorLog do
             count
         }
         
     count >! 0        
-    ctx.RollbackTransaction()
+    shared.RollbackTransaction()
 }
 
 [<Test>]
@@ -681,7 +671,7 @@ let ``Query Employee Record with DateOnly``() = task {
     let maxBirthDate = System.DateOnly(2005, 1, 1)
 
     let! employees =
-        selectTask openContext {
+        selectTask db {
             for e in HumanResources.Employee do
             where (e.BirthDate < maxBirthDate)
             select e
@@ -695,7 +685,7 @@ let ``Query Employee Column with DateOnly``() = task {
     let maxBirthDate = System.DateOnly(2005, 1, 1)
 
     let! employeeBirthDates =
-        selectTask openContext {
+        selectTask db {
             for e in HumanResources.Employee do
             where (e.BirthDate < maxBirthDate)
             select e.BirthDate
@@ -706,11 +696,11 @@ let ``Query Employee Column with DateOnly``() = task {
 
 [<Test>]
 let ``Update Employee DateOnly``() = task {
-    use ctx = openContext()
-    ctx.BeginTransaction()
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
             
     let! employees =
-        selectTask ctx {
+        selectTask shared {
             for e in HumanResources.Employee do
             select e
         }
@@ -721,7 +711,7 @@ let ``Update Employee DateOnly``() = task {
     let birthDate = System.DateOnly(1980, 1, 1)
 
     let! result = 
-        updateTask ctx {
+        updateTask shared {
             for e in HumanResources.Employee do
             set e.BirthDate birthDate
             where (e.BusinessEntityID = emp.BusinessEntityID)
@@ -730,7 +720,7 @@ let ``Update Employee DateOnly``() = task {
     result =! 1
 
     let! refreshedEmp = 
-        selectTask ctx {
+        selectTask shared {
             for e in HumanResources.Employee do
             where (e.BusinessEntityID = emp.BusinessEntityID)                    
             tryHead
@@ -741,7 +731,7 @@ let ``Update Employee DateOnly``() = task {
         |> Option.map (fun e -> e.BirthDate)
             
     actualBirthDate =! Some birthDate            
-    ctx.RollbackTransaction()
+    shared.RollbackTransaction()
 }
 
 [<Test>]
@@ -749,7 +739,7 @@ let ``Query Shift Record with TimeOnly``() = task {
     let minStartTime = System.TimeOnly(9, 30)
 
     let! shiftsAfter930AM =
-        selectTask openContext {
+        selectTask db {
             for s in HumanResources.Shift do
             where (s.StartTime >= minStartTime)
         }
@@ -764,7 +754,7 @@ let ``Query Shift Column with TimeOnly``() = task {
     let minStartTime = System.TimeOnly(9, 30)
 
     let! shiftsAfter930AM =
-        selectTask openContext {
+        selectTask db {
             for s in HumanResources.Shift do
             where (s.StartTime >= minStartTime)
             select s.StartTime
@@ -777,20 +767,20 @@ let ``Query Shift Column with TimeOnly``() = task {
 
 [<Test>]
 let ``Update Shift with TimeOnly``() = task {
-    use ctx = openContext()
-    ctx.BeginTransaction()
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
             
     let minStartTime = System.TimeOnly(9, 30)
     let updatedStartTime = System.TimeOnly(10, 30)
 
-    do! updateTask ctx {
+    do! updateTask shared {
             for s in HumanResources.Shift do
             set s.StartTime updatedStartTime
             where (s.StartTime >= minStartTime)
         } :> Task
 
     let! shiftsat1030AM =
-        selectTask ctx {
+        selectTask shared {
             for s in HumanResources.Shift do
             where (s.StartTime = updatedStartTime)
         } 
@@ -799,13 +789,13 @@ let ``Update Shift with TimeOnly``() = task {
     // Results should contain 2 shifts: evening and night
     gt0 shiftsat1030AM
 
-    ctx.RollbackTransaction()
+    shared.RollbackTransaction()
 }
 
 [<Test>]
 let ``Insert, update, and select with both datetime and datetime2 precision``() = task {
-    use ctx = openContext ()
-    ctx.BeginTransaction()
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
     
     let baseTimestamp = System.DateTime(2022,07,22, 11,50,28)
     let timestamp = System.DateTime(baseTimestamp.Ticks + 1234567L)
@@ -822,10 +812,10 @@ let ``Insert, update, and select with both datetime and datetime2 precision``() 
             into ext.DateTime2Support 
             entity entity'
         }
-        |> ctx.InsertAsync
+        |> shared.InsertAsync
 
     let! retrievedBack = 
-        selectTask ctx {
+        selectTask shared {
             for row in ext.DateTime2Support do
             select row
         }
@@ -834,14 +824,14 @@ let ``Insert, update, and select with both datetime and datetime2 precision``() 
     Assert.AreNotEqual([timestamp], [for (row: ext.DateTime2Support) in retrievedBack -> row.LessPrecision], "INSERT: Expected a loss of precision when storing a DATETIME")
 
     let! fullPrecisionQuery = 
-        selectTask ctx { 
+        selectTask shared { 
             for row in ext.DateTime2Support do
             where (row.MorePrecision = timestamp)
             count
         }
 
     let! lessPrecisionQuery = 
-        selectTask ctx { 
+        selectTask shared { 
             for row in ext.DateTime2Support do
             where (row.LessPrecision = timestamp)
             count
@@ -853,35 +843,34 @@ let ``Insert, update, and select with both datetime and datetime2 precision``() 
     let newTimestamp = System.DateTime(baseTimestamp.Ticks + 2345678L)
 
     let! _ = 
-        updateTask ctx {
+        updateTask shared {
             for row in ext.DateTime2Support do
             set row.MorePrecision newTimestamp
             where (row.MorePrecision = timestamp)
         }
 
     let! _ = 
-        updateTask ctx {
+        updateTask shared {
             for row in ext.DateTime2Support do
             set row.LessPrecision newTimestamp
             where (row.LessPrecision = timestamp)
         }
 
     let! retrievedBack = 
-        selectTask ctx {
+        selectTask shared {
             for row in ext.DateTime2Support do
             select row
         }
 
     Assert.AreEqual([newTimestamp], [for (row: ext.DateTime2Support) in retrievedBack -> row.MorePrecision], "UPDATE: Expected DATETIME2 to be stored with full precision")
     Assert.AreNotEqual([newTimestamp], [for (row: ext.DateTime2Support) in retrievedBack -> row.LessPrecision], "UPDATE: Expected a loss of precision when storing a DATETIME")
-    ctx.RollbackTransaction ()
+    shared.RollbackTransaction ()
 }
 
 [<Test>]
 let ``Guid getId Bug Repro Issue 38``() = task {
-    use ctx = openContext()
     let! guid = 
-        insertAsync ctx {
+        insertAsync db {
             for row in ext.GetIdGuidRepro do
             entity
                 {
@@ -897,12 +886,12 @@ let ``Guid getId Bug Repro Issue 38``() = task {
     
 [<Test>]
 let ``HierarchyId not supported for MS SQL Issue 110``() = task {
-    use ctx = openContext()
-    ctx.BeginTransaction()
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
     let parent = SqlHierarchyId.Parse("/1/1/")
     let child = SqlHierarchyId.Parse("/1/1/1/")
     let id_parent = Guid.NewGuid()
-    do! insertTask ctx {
+    do! insertTask shared {
             into ext.HierarchyIdSupport
             entity
                 {
@@ -911,7 +900,7 @@ let ``HierarchyId not supported for MS SQL Issue 110``() = task {
                 }
         } : Task
 
-    do! insertTask ctx {
+    do! insertTask shared {
             into ext.HierarchyIdSupport
             entity
                 {
@@ -922,7 +911,7 @@ let ``HierarchyId not supported for MS SQL Issue 110``() = task {
 
     let node = child.GetAncestor(1)
     let! result = 
-        selectTask ctx { 
+        selectTask shared { 
             for row in ext.HierarchyIdSupport do
             where (row.Id = id_parent && areEqual row.Hierarchy node)
             select row.Hierarchy
@@ -931,13 +920,13 @@ let ``HierarchyId not supported for MS SQL Issue 110``() = task {
       
     result.Length =! 1
     result.Head =! parent
-    ctx.RollbackTransaction()
+    shared.RollbackTransaction()
 }
 
 [<Test>]
 let ``Individual column from a leftJoin table should be optional if Some``() = task {
     let! results = 
-        selectTask openContext  {
+        selectTask db {
             for o in Sales.SalesOrderHeader do
             leftJoin sr in Sales.SalesOrderHeaderSalesReason on (o.SalesOrderID = sr.Value.SalesOrderID)
             leftJoin r in Sales.SalesReason on (sr.Value.SalesReasonID = r.Value.SalesReasonID)
@@ -986,11 +975,11 @@ let ``DiffService Diff`` () =
 
 [<Test>]
 let ``DiffService Save`` () = task {
-    use ctx = openContext()
+    use! shared = db.OpenContextAsync()
     let today = System.DateTime.Today
 
     let! existingDepartments = 
-        selectTask ctx {
+        selectTask shared {
             for d in HumanResources.Department do
             toList
         }
@@ -1006,7 +995,7 @@ let ``DiffService Save`` () = task {
             { DepartmentID = 17s; Name = "App Dev"; GroupName = "Software"; ModifiedDate = today } 
         ]
     
-    ctx.BeginTransaction()
+    shared.BeginTransaction()
 
     let! saveResults = 
         Diff.Compare(updatedDepartments, existingDepartments, _.DepartmentID)
@@ -1024,7 +1013,7 @@ let ``DiffService Save`` () = task {
                     where (dept.DepartmentID = changed.DepartmentID)
                 }
             )
-            .SaveTask(ctx, createTransaction = false)
+            .SaveTask(shared, createTransaction = false)
 
     saveResults.Deleted =! 0
     saveResults.Updated =! 1
@@ -1032,7 +1021,7 @@ let ``DiffService Save`` () = task {
 
     // Pull departments again, verify, then try delete.
     let! existingDepartments = 
-        selectTask ctx {
+        selectTask shared {
             for d in HumanResources.Department do
             toList
         }
@@ -1052,19 +1041,19 @@ let ``DiffService Save`` () = task {
                     where (row.DepartmentID = removed.DepartmentID)
                 }
             )
-            .SaveTask(ctx, createTransaction = false)
+            .SaveTask(shared, createTransaction = false)
 
     saveResults.Deleted =! 1
     saveResults.Updated =! 0
     saveResults.Inserted =! 0
 
-    ctx.RollbackTransaction()
+    shared.RollbackTransaction()
 }
 
 [<Test>]
 let ``Multiple Joins Same Table`` () = task {
     let! order, sp, cp =
-        selectTask openContext {
+        selectTask db {
             for order in Sales.SalesOrderHeader do
             join s in Sales.SalesPerson on (order.SalesPersonID.Value = s.BusinessEntityID)
             join sp in Person.Person on (s.BusinessEntityID = sp.BusinessEntityID)
@@ -1097,7 +1086,7 @@ open type SqlFn
 [<Test>]
 let ``SQL Functions - Multiple functions in select`` () = task {
     let! results =
-        selectTask openContext {
+        selectTask db {
             for p in Person.Person do
             where (p.FirstName = "Ken")
             select (p.FirstName, LEN p.FirstName, UPPER p.FirstName, GETDATE())
@@ -1115,7 +1104,7 @@ let ``SQL Functions - Multiple functions in select`` () = task {
 [<Test>]
 let ``SQL Functions - Nested function calls`` () = task {
     let! results =
-        selectTask openContext {
+        selectTask db {
             for p in Person.Person do
             where (p.FirstName = "Ken")
             select (LEN (UPPER p.FirstName))
@@ -1129,7 +1118,7 @@ let ``SQL Functions - Nested function calls`` () = task {
 [<Test>]
 let ``SQL Functions - Multi-param functions`` () = task {
     let! results =
-        selectTask openContext {
+        selectTask db {
             for p in Person.Person do
             where (p.FirstName = "Ken")
             select (SUBSTRING(p.FirstName, 1, 2), CONCAT(p.FirstName, p.LastName))
@@ -1145,7 +1134,7 @@ let ``SQL Functions - Multi-param functions`` () = task {
 let ``SQL Functions - Static methods with open type`` () = task {
     // Using `open type SqlServerFn` allows unqualified access - looks like SQL!
     let! results =
-        selectTask openContext {
+        selectTask db {
             for p in Person.Person do
             where (p.FirstName = "Ken")
             select (LEN(p.FirstName), UPPER(p.FirstName), ISNULL(p.MiddleName, "N/A"))
@@ -1161,9 +1150,11 @@ let ``SQL Functions - Static methods with open type`` () = task {
 
 [<Test>]
 let ``SQL Functions - ISNULL with Option overload`` () = task {
+    use! shared = db.OpenContextAsync()
+
     // Find a Ken with NULL middle name (most have NULL)
     let! nullResults =
-        selectTask openContext {
+        selectTask shared {
             for p in Person.Person do
             where (p.FirstName = "Ken" && isNullValue p.MiddleName)
             select (ISNULL(p.MiddleName, "NoMiddle"))
@@ -1175,7 +1166,7 @@ let ``SQL Functions - ISNULL with Option overload`` () = task {
 
     // Find a Ken with non-NULL middle name
     let! nonNullResults =
-        selectTask openContext {
+        selectTask shared {
             for p in Person.Person do
             where (p.FirstName = "Ken" && isNotNullValue p.MiddleName)
             select (ISNULL(p.MiddleName, "NoMiddle"))
@@ -1191,7 +1182,7 @@ let ``SQL Functions - ISNULL with non-optional column`` () = task {
     // FirstName is non-optional (string, not Option<string>)
     // This uses the generic 'T overload
     let! results =
-        selectTask openContext {
+        selectTask db {
             for p in Person.Person do
             where (p.FirstName = "Ken")
             select (ISNULL(p.FirstName, "Unknown"))
@@ -1205,7 +1196,7 @@ let ``SQL Functions - ISNULL with non-optional column`` () = task {
 [<Test>]
 let ``SQL Functions - Date and numeric functions`` () = task {
     let! results =
-        selectTask openContext {
+        selectTask db {
             for o in Sales.SalesOrderHeader do
             select (o.SalesOrderID, YEAR(o.OrderDate), MONTH(o.OrderDate), ABS(o.TotalDue), ROUND(o.TotalDue, 0))
             take 1
@@ -1222,7 +1213,7 @@ let ``SQL Functions - Date and numeric functions`` () = task {
 [<Test>]
 let ``SQL Functions - In WHERE clause with value comparison`` () = task {
     let! results =
-        selectTask openContext {
+        selectTask db {
             for p in Person.Person do
             where (LEN(p.FirstName) > 3)
             select p.FirstName
@@ -1237,7 +1228,7 @@ let ``SQL Functions - In WHERE clause with value comparison`` () = task {
 [<Test>]
 let ``SQL Functions - In WHERE clause comparing two functions`` () = task {
     let! results =
-        selectTask openContext {
+        selectTask db {
             for p in Person.Person do
             where (LEN(p.FirstName) < LEN(p.LastName))
             select (p.FirstName, p.LastName)
@@ -1252,7 +1243,7 @@ let ``SQL Functions - In WHERE clause comparing two functions`` () = task {
 [<Test>]
 let ``SQL Functions - In WHERE clause with UPPER`` () = task {
     let! results =
-        selectTask openContext {
+        selectTask db {
             for p in Person.Person do
             where (UPPER(p.FirstName) = "KEN")
             select p.FirstName

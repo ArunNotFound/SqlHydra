@@ -143,6 +143,11 @@ namespace {{cfg.Namespace}}
         let compiler = mkCompiler provider.Type
         let connectionType = mkConnectionType provider.Type
 
+        $"""
+[<System.Obsolete("The HydraBuilders module is no longer needed and will be removed in v4.0.0.")>]
+module HydraBuilders = ()
+        """
+
         if provider.Type = ProviderType.Npgsql then
             $"""
 type QueryContextFactory =
