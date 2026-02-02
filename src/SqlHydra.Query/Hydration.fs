@@ -93,6 +93,8 @@ let private buildRecordFieldReaders (reader: DbDataReader) (recordType: Type) (o
         let isOpt = isOptionType fieldType
         let isNullable = isNullableType fieldType
         let baseType = unwrapType fieldType
+        // Reference types (e.g. string, byte[]) can be NULL in SQL even without Option/Nullable wrapper
+        let isNullable = isNullable || (not isOpt && baseType.IsClass)
         let columnReader = makeColumnReader reader baseType isOpt isNullable
         let ordinal = ordinalLookup.[pi.Name]
         (ordinal, columnReader)
