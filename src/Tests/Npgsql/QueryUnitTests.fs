@@ -263,7 +263,7 @@ let ``Correlated Subquery``() =
     sql =!
         "SELECT * FROM \"sales\".\"salesorderheader\" AS \"od\" WHERE (\"od\".\"orderdate\" = \
         (SELECT MAX(\"d\".\"orderdate\") AS __hydra_expr_0 FROM \"sales\".\"salesorderheader\" AS \"d\" \
-        WHERE (\"d\".\"customerid\" = \"od\".\"customerid\")))"
+        WHERE (\"d\".\"customerid\" = \"od\".\"customerid\")))".RemoveHydraExpr()
 
 [<Test>]
 let ``Delete Query with Where``() = 
@@ -411,4 +411,4 @@ let ``Inline Aggregates``() =
         }
         |> toSql
 
-    sql =! "SELECT COUNT(\"o\".\"salesorderid\") AS __hydra_expr_0 FROM \"sales\".\"salesorderheader\" AS \"o\""
+    sql =! "SELECT COUNT(\"o\".\"salesorderid\") AS __hydra_expr_0 FROM \"sales\".\"salesorderheader\" AS \"o\"".RemoveHydraExpr()

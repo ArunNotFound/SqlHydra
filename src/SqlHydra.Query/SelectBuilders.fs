@@ -146,62 +146,62 @@ type SelectBuilder<'Selected, 'Mapped> () =
         let where = LinqExpressionVisitors.visitWhere<'T> tableMappings whereExpression qualifyColumnWithAlias
         QuerySource<'T, Query>(query.Where(fun w -> where), state.TableMappings)
 
-    ///// Sets the SELECT statement and filters the query to include only the selected tables
-    ////[<CustomOperation("select", MaintainsVariableSpace = true, AllowIntoPattern = true)>]
-    //member this.Select (state: QuerySource<'T, Query>, [<ProjectionParameter>] selectExpression: Expression<Func<'T, 'Selected>>) =
-    //    let selections = LinqExpressionVisitors.visitSelect<'T,'Selected> selectExpression
+    /// Sets the SELECT statement and filters the query to include only the selected tables
+    [<CustomOperation("select", MaintainsVariableSpace = true, AllowIntoPattern = true)>]
+    member this.Select (state: QuerySource<'T, Query>, [<ProjectionParameter>] selectExpression: Expression<Func<'T, 'Selected>>) =
+        let selections = LinqExpressionVisitors.visitSelect<'T,'Selected> selectExpression
 
-    //    let queryWithSelectedColumns =
-    //        selections
-    //        |> List.fold (fun (q: Query) -> function
-    //            | LinqExpressionVisitors.SelectedTable (tableAlias, tableType) ->
-    //                // Explicitly select all columns in generated table record type.
-    //                // This avoids table scans due to 'SELECT *', and avoids potential errors when a table has more columns than expected.
-    //                //let props =
-    //                //    FSharp.Reflection.FSharpType.GetRecordFields(tableType)
-    //                //    |> Array.map (fun p -> $"%s{tableAlias}.%s{p.Name}")
-    //                //q.Select(props)
+        let queryWithSelectedColumns =
+            selections
+            |> List.fold (fun (q: Query) -> function
+                | LinqExpressionVisitors.SelectedTable (tableAlias, tableType) ->
+                    // Explicitly select all columns in generated table record type.
+                    // This avoids table scans due to 'SELECT *', and avoids potential errors when a table has more columns than expected.
+                    //let props =
+                    //    FSharp.Reflection.FSharpType.GetRecordFields(tableType)
+                    //    |> Array.map (fun p -> $"%s{tableAlias}.%s{p.Name}")
+                    //q.Select(props)
 
-    //                // Bug fix: temporarily revert to * until option types are properly implemented.
-    //                // `tableType` was not properly unwrapping option types, causing a runtime error.
-    //                // For example, left joining a table creates an option type, which should be unwrapped.
-    //                q.Select($"%s{tableAlias}.*")
+                    // Bug fix: temporarily revert to * until option types are properly implemented.
+                    // `tableType` was not properly unwrapping option types, causing a runtime error.
+                    // For example, left joining a table creates an option type, which should be unwrapped.
+                    q.Select($"%s{tableAlias}.*")
 
-    //            | LinqExpressionVisitors.SelectedColumn (tableAlias, column, _, _, _) ->
-    //                // Select a single column
-    //                q.Select($"%s{tableAlias}.%s{column}")
-    //            | LinqExpressionVisitors.SelectedExpression sqlFragment ->
-    //                q.SelectRaw(sqlFragment)
-    //        ) state.Query
+                | LinqExpressionVisitors.SelectedColumn (tableAlias, column, _, _, _) ->
+                    // Select a single column
+                    q.Select($"%s{tableAlias}.%s{column}")
+                | LinqExpressionVisitors.SelectedExpression sqlFragment ->
+                    q.SelectRaw(sqlFragment)
+            ) state.Query
 
-    //    QuerySource<'Selected, Query>(queryWithSelectedColumns, state.TableMappings)
+        QuerySource<'Selected, Query>(queryWithSelectedColumns, state.TableMappings)
 
     /// Sets the SELECT statement using an arbitrary F# expression.
     /// Supports string interpolation, conditionals, and other F# expressions that reference DB columns.
-    [<CustomOperation("select", MaintainsVariableSpace = true, AllowIntoPattern = true)>]
-    member this.SelectExpr (state: QuerySource<'T, Query>, [<ProjectionParameter>] selectExpression: Expression<Func<'T, 'Selected>>) =
-        let exprInfo = LinqExpressionVisitors.visitSelectExpr<'T, 'Selected> selectExpression
+    //[<CustomOperation("selectExpr", MaintainsVariableSpace = true, AllowIntoPattern = true)>]
+    //member this.SelectExpr (state: QuerySource<'T, Query>, [<ProjectionParameter>] selectExpression: Expression<Func<'T, 'Selected>>) =
+    //    let exprInfo = LinqExpressionVisitors.visitSelectExpr<'T, 'Selected> selectExpression
 
-        // Collect aliases that have a TableLeaf (full record); suppress individual ColumnLeafs for those aliases
-        let tableLeafAliases =
-            exprInfo.Leaves
-            |> List.choose (function
-                | LinqExpressionVisitors.TableLeaf (tableAlias, _, _) -> Some tableAlias
-                | _ -> None)
-            |> Set.ofList
+    //    // Collect aliases that have a TableLeaf (full record); suppress individual ColumnLeafs for those aliases
+    //    let tableLeafAliases =
+    //        exprInfo.Leaves
+    //        |> List.choose (function
+    //            | LinqExpressionVisitors.TableLeaf (tableAlias, _, _) -> Some tableAlias
+    //            | _ -> None)
+    //        |> Set.ofList
 
-        let queryWithSelectedColumns =
-            exprInfo.Leaves
-            |> List.fold (fun (q: Query) leaf ->
-                match leaf with
-                | LinqExpressionVisitors.TableLeaf (tableAlias, _, _) -> q.Select($"%s{tableAlias}.*")
-                | LinqExpressionVisitors.ColumnLeaf (tableAlias, _, _, _, _, _) when tableLeafAliases.Contains(tableAlias) -> q // Suppressed by TableLeaf
-                | LinqExpressionVisitors.ColumnLeaf (tableAlias, column, _, _, _, _) -> q.Select($"%s{tableAlias}.%s{column}")
-                | LinqExpressionVisitors.SqlExprLeaf (sqlFragment, _, alias, _) -> q.SelectRaw($"{sqlFragment} AS {alias}")
-            ) state.Query
+    //    let queryWithSelectedColumns =
+    //        exprInfo.Leaves
+    //        |> List.fold (fun (q: Query) leaf ->
+    //            match leaf with
+    //            | LinqExpressionVisitors.TableLeaf (tableAlias, _, _) -> q.Select($"%s{tableAlias}.*")
+    //            | LinqExpressionVisitors.ColumnLeaf (tableAlias, _, _, _, _, _) when tableLeafAliases.Contains(tableAlias) -> q // Suppressed by TableLeaf
+    //            | LinqExpressionVisitors.ColumnLeaf (tableAlias, column, _, _, _, _) -> q.Select($"%s{tableAlias}.%s{column}")
+    //            | LinqExpressionVisitors.SqlExprLeaf (sqlFragment, _, alias, _) -> q.SelectRaw($"{sqlFragment} AS {alias}")
+    //        ) state.Query
 
-        LinqExpressionVisitors.SelectExprStore.set queryWithSelectedColumns exprInfo
-        QuerySource<'Selected, Query>(queryWithSelectedColumns, state.TableMappings)
+    //    LinqExpressionVisitors.SelectExprStore.set queryWithSelectedColumns exprInfo
+    //    QuerySource<'Selected, Query>(queryWithSelectedColumns, state.TableMappings)
 
     /// Sets the ORDER BY for single column
     [<CustomOperation("orderBy", MaintainsVariableSpace = true)>]

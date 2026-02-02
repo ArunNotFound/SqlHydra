@@ -23,9 +23,9 @@ let ``selectAsync - no select``() = async {
             for o in Sales.SalesOrderHeader do
             join d in Sales.SalesOrderDetail on (o.SalesOrderID = d.SalesOrderID)
             take 10
-            //mapArray $"{o.SalesOrderNumber} - {d.LineTotal} - {d.ModifiedDate.ToShortDateString()}"
-            select $"{o.SalesOrderNumber} - {d.LineTotal} - {d.ModifiedDate.ToShortDateString()}"
-            toArray
+            mapArray $"{o.SalesOrderNumber} - {d.LineTotal} - {d.ModifiedDate.ToShortDateString()}"
+            //select $"{o.SalesOrderNumber} - {d.LineTotal} - {d.ModifiedDate.ToShortDateString()}"
+            //toArray
         }
         
     gt0 results
