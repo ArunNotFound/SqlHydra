@@ -1431,7 +1431,7 @@ let visitSelectExpr<'T, 'Selected> (selectExpression: Expression<Func<'T, 'Selec
         // --- SQL leaf detection (before generic cases) ---
         | AggregateColumn (aggType, (p, _)) ->
             let alias = visitAlias p.Expression
-            let fqCol = $"{alias}.{p.Member.Name}"
+            let fqCol = $"[{alias}].[{p.Member.Name}]" // NOTE: SqlKata will translate [ ] to proper quoting for the target dialect.
             let sqlFragment = $"{aggType}({fqCol})"
             let exprAlias = $"__hydra_expr_{!sqlExprCounter}"
             sqlExprCounter := !sqlExprCounter + 1
