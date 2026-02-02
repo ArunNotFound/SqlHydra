@@ -925,8 +925,10 @@ let ``HierarchyId not supported for MS SQL Issue 110``() = task {
 
 [<Test>]
 let ``Individual column from a leftJoin table should be optional if Some``() = task {
+    use! ctx = db.OpenContextAsync()
+
     let! results = 
-        selectTask db {
+        select {
             for o in Sales.SalesOrderHeader do
             leftJoin sr in Sales.SalesOrderHeaderSalesReason on (o.SalesOrderID = sr.Value.SalesOrderID)
             leftJoin r in Sales.SalesReason on (sr.Value.SalesReasonID = r.Value.SalesReasonID)
@@ -935,6 +937,7 @@ let ``Individual column from a leftJoin table should be optional if Some``() = t
             select (o.SalesOrderID, r |> Option.map _.ReasonType, r |> Option.map _.Name)   // v4 proper handling
             take 10
         }
+        |> ctx.SelectAsync
 
     let reasonsExist = 
         results 
