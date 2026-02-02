@@ -181,7 +181,13 @@ module main =
     let SalesOrderHeader = table<SalesOrderHeader>
 
 
-[<System.Obsolete("The HydraBuilders module is no longer needed and will be removed in v4.0.0.")>]
+[<System.Obsolete("The HydraReader module is no longer needed and will be removed in v4.0.")>]
+type HydraReader =
+    static member Read(reader: Microsoft.Data.SqlClient.SqlDataReader) : (unit -> 'T) =
+        Hydration.buildRowReader<'T> Domain.ProviderType.Sqlite reader
+
+
+[<System.Obsolete("The HydraBuilders module is no longer needed and will be removed in v4.0.")>]
 module HydraBuilders =
     ()
 

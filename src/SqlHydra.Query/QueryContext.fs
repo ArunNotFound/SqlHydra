@@ -170,6 +170,84 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
             return reader :?> 'Reader
         }
 
+    /// Executes a select query with a given readEntity builder function.
+    [<System.Obsolete("This method will be removed in v4.0. Please use Select instead.")>]
+    member this.Read<'Entity, 'Reader & #DbDataReader> (readEntityBuilder: 'Reader -> (unit -> 'Entity)) (query: SelectQuery<'Entity>) =
+        this.Select<'Entity>(query)
+
+    /// Executes a select query with a given readEntity builder function.
+    [<System.Obsolete("This method will be removed in v4.0. Please use SelectAsync instead.")>]
+    member this.ReadAsync<'Entity, 'Reader & #DbDataReader> (readEntityBuilder: 'Reader -> (unit -> 'Entity)) (query: SelectQuery<'Entity>) = 
+        this.SelectAsync<'Entity>(query)
+
+    /// Executes a select query with a given readEntity builder function and optional args.
+    [<System.Obsolete("This method will be removed in v4.0. Please use SelectAsyncWithOptions instead.")>]
+    member this.ReadAsyncWithOptions<'Entity, 'Reader & #DbDataReader>(query: SelectQuery<'Entity>, readEntityBuilder: 'Reader -> (unit -> 'Entity), ?cancel: CancellationToken) = 
+        this.SelectAsyncWithOptions<'Entity>(query, ?cancel = cancel)
+
+    /// Executes a select query with a given readEntity builder function for a single (option) result.
+    [<System.Obsolete("This method will be removed in v4.0. Please use SelectOne instead.")>]
+    member this.ReadOne<'Entity, 'Reader & #DbDataReader> (readEntityBuilder: 'Reader -> (unit -> 'Entity)) (query: SelectQuery<'Entity>) =
+        this.SelectOne<'Entity>(query)
+
+    /// Executes a select query with a given readEntity builder function for a single (option) result.
+    [<System.Obsolete("This method will be removed in v4.0. Please use SelectOneAsync instead.")>]
+    member this.ReadOneAsync<'Entity, 'Reader & #DbDataReader> (readEntityBuilder: 'Reader -> (unit -> 'Entity)) (query: SelectQuery<'Entity>) = 
+        this.SelectOneAsync<'Entity>(query)
+
+    /// Executes a select query with a given readEntity builder function for a single (option) result with optional args.
+    [<System.Obsolete("This method will be removed in v4.0. Please use SelectOneAsyncWithOptions instead.")>]
+    member this.ReadOneAsyncWithOptions<'Entity, 'Reader & #DbDataReader>(query: SelectQuery<'Entity>, readEntityBuilder: 'Reader -> (unit -> 'Entity), ?cancel: CancellationToken) = 
+        this.SelectOneAsyncWithOptions<'Entity>(query, ?cancel = cancel)
+
+    /// Executes a select query and returns results using the Hydration module.
+    member this.Select<'Entity> (query: SelectQuery<'Entity>) =
+        use cmd = this.BuildCommand(query.ToKataQuery())
+        use reader = cmd.ExecuteReader()
+        let readEntity = Hydration.buildRowReader<'Entity> this.Provider reader
+        seq [|
+            while reader.Read() do
+                readEntity()
+        |]
+
+    /// Executes a select query asynchronously and returns results using the Hydration module.
+    member this.SelectAsync<'Entity> (query: SelectQuery<'Entity>) =
+        this.SelectAsyncWithOptions (query)
+
+    /// Executes a select query asynchronously with optional args and returns results using the Hydration module.
+    member this.SelectAsyncWithOptions<'Entity>(query: SelectQuery<'Entity>, ?cancel: CancellationToken) =
+        task { // Must wrap in task to prevent `EndExecuteNonQuery` ex in NET6_0_OR_GREATER
+            let cancel = defaultArg cancel CancellationToken.None
+            use cmd = this.BuildCommand (query.ToKataQuery())
+            use! reader = cmd.ExecuteReaderAsync(cancel)
+            let readEntity = Hydration.buildRowReader<'Entity> this.Provider reader
+            let results = ResizeArray<'Entity>()
+
+            let! hasMore = reader.ReadAsync(cancel)
+            let mutable hasMore = hasMore
+            while hasMore && not cancel.IsCancellationRequested do
+                results.Add(readEntity ())
+                let! hasMore' = reader.ReadAsync(cancel)
+                hasMore <- hasMore'
+
+            return results :> seq<'Entity>
+        }
+
+    /// Executes a select query and returns a single (option) result using the Hydration module.
+    member this.SelectOne<'Entity> (query: SelectQuery<'Entity>) =
+        this.Select(query) |> Seq.tryHead
+
+    /// Executes a select query asynchronously and returns a single (option) result using the Hydration module.
+    member this.SelectOneAsync<'Entity> (query: SelectQuery<'Entity>) =
+        this.SelectOneAsyncWithOptions(query)
+
+    /// Executes a select query asynchronously for a single (option) result with optional args using the Hydration module.
+    member this.SelectOneAsyncWithOptions<'Entity>(query: SelectQuery<'Entity>, ?cancel: CancellationToken) =
+        task { // Must wrap in task to prevent `EndExecuteNonQuery` ex in NET6_0_OR_GREATER
+            let! entities = this.SelectAsyncWithOptions (query, cancel |> Option.defaultValue CancellationToken.None)
+            return entities |> Seq.tryHead
+        }
+
     member this.Insert<'T, 'InsertReturn> (iq: InsertQuery<'T, 'InsertReturn>) = 
         let compiledQuery = iq.ToKataQuery() |> compiler.Compile
         use cmd = this.BuildCommand(compiledQuery, log = false) // We will log manually below to capture query changes
