@@ -56,7 +56,7 @@ let ``selectTask - mapList column``() = task {
         selectTask db {
             for p in Person.Person do
             take 10
-            mapList p.FirstName
+            select p.FirstName
         }
         
     gt0 results
@@ -68,8 +68,7 @@ let ``selectTask - select entity - mapSeq column``() = task {
         selectTask db {
             for p in Person.Person do
             take 10
-            select p
-            mapSeq $"{p.FirstName} {p.LastName}"
+            select $"{p.FirstName} {p.LastName}"
         }
         
     gt0 results
@@ -81,8 +80,7 @@ let ``selectTask - select columns into - mapList column``() = task {
         selectTask db {
             for p in Person.Person do
             take 10
-            select (p.FirstName, p.LastName) into (fname, lname)
-            mapList $"{fname} {lname}"
+            select $"{p.FirstName} {p.LastName}"
         }
         
     gt0 results
@@ -117,7 +115,7 @@ let ``selectTask - tryHead - Mapped``() = task {
         selectTask db {
             for p in Person.Person do
             take 1
-            mapSeq $"{p.FirstName} {p.LastName}"
+            select $"{p.FirstName} {p.LastName}"
             tryHead
         }
         
@@ -131,7 +129,7 @@ let ``selectExpr - complex expression``() = task {
         selectTask db {
             for p in Person.Person do
             take 10
-            selectExpr (
+            select (
                 if p.FirstName = "John" 
                 then $"{p.FirstName} {p.LastName} (VIP)"
                 else $"{p.FirstName} <> John"
@@ -143,14 +141,35 @@ let ``selectExpr - complex expression``() = task {
 }
 
 [<Test>]
-let ``selectExpr - leftJoin`` () = task {
+let ``selectExpr - leftJoin - select interpolated string`` () = task {
     let! results = 
         selectTask db  {
             for o in Sales.SalesOrderHeader do
             leftJoin sr in Sales.SalesOrderHeaderSalesReason on (o.SalesOrderID = sr.Value.SalesOrderID)
             leftJoin r in Sales.SalesReason on (sr.Value.SalesReasonID = r.Value.SalesReasonID)
             where (isNotNullValue r.Value.Name)
-            select (o, r |> Option.map _.ReasonType, r |> Option.map _.Name) into selected
+            select $"""Order: {o.SalesOrderID}, Reason: {r |> Option.map _.ReasonType |> Option.defaultValue "No Reason"}, Name: {r |> Option.map _.Name |> Option.defaultValue "No Name"}\n"""
+            toArray
+            take 10
+        }
+
+    results |> Array.iter (printf "%s")
+    gt0 results
+}
+
+[<Test>]
+let ``selectExpr - leftJoin - select individual columns into mapArray`` () = task {
+    let! results = 
+        selectTask db  {
+            for o in Sales.SalesOrderHeader do
+            leftJoin sr in Sales.SalesOrderHeaderSalesReason on (o.SalesOrderID = sr.Value.SalesOrderID)
+            leftJoin r in Sales.SalesReason on (sr.Value.SalesReasonID = r.Value.SalesReasonID)
+            where (isNotNullValue r.Value.Name)
+            select (
+                o, 
+                r |> Option.map _.ReasonType, 
+                r |> Option.map _.Name
+            ) into selected
             mapArray (
                 let order, reason, name = selected
                 $"Order: {order.SalesOrderID}, Reason: {reason}, Name: {name}\n"
@@ -163,35 +182,36 @@ let ``selectExpr - leftJoin`` () = task {
 }
 
 [<Test>]
-let ``selectExpr - leftJoin column-only`` () = task {
+let ``selectExpr - leftJoin - select individual columns`` () = task {
     let! results =
         selectTask db {
             for o in Sales.SalesOrderHeader do
             leftJoin sr in Sales.SalesOrderHeaderSalesReason on (o.SalesOrderID = sr.Value.SalesOrderID)
             leftJoin r in Sales.SalesReason on (sr.Value.SalesReasonID = r.Value.SalesReasonID)
             where (isNotNullValue r.Value.Name)
-            selectExpr (
-                o.AccountNumber,
-                r |> Option.map _.ReasonType,
-                r |> Option.map _.Name
+            select (
+                o.SalesOrderID,                 // Will SELECT o.SalesOrderID
+                r |> Option.map _.ReasonType,   // Will SELECT r.ReasonType
+                r |> Option.map _.Name          // Will SELECT r.Name
             )
             take 10
             toArray
         }
 
-    results |> Array.iter (fun (acct, reason, name) -> printf $"Acct: {acct}, Reason: {reason}, Name: {name}\n")
+    results |> Array.iter (fun (orderId, reason, name) -> printf $"Acct: %i{orderId}, Reason: %O{reason}, Name: %O{name}\n")
     gt0 results
 }
 
 [<Test>]
-let ``selectExpr - leftJoin 2`` () = task {
+let ``selectExpr - leftJoin - match on left joined table`` () = task {
     let! results = 
         selectTask db  {
             for o in Sales.SalesOrderHeader do
             leftJoin sr in Sales.SalesOrderHeaderSalesReason on (o.SalesOrderID = sr.Value.SalesOrderID)
             leftJoin r in Sales.SalesReason on (sr.Value.SalesReasonID = r.Value.SalesReasonID)
             where (isNotNullValue r.Value.Name)
-            selectExpr (
+            select (
+                // matching on `r` will SELECT r.* in the SQL
                 match r with
                 | Some reason -> $"Order: {o.SalesOrderID}, Reason: {reason.ReasonType}\n"
                 | None -> "No Reason Given"                
@@ -216,7 +236,7 @@ let ``selectExpr - leftJoin - provenance`` () = task {
             leftJoin sr in Sales.SalesOrderHeaderSalesReason on (o.SalesOrderID = sr.Value.SalesOrderID)
             leftJoin r in Sales.SalesReason on (sr.Value.SalesReasonID = r.Value.SalesReasonID)
             where (isNotNullValue r.Value.Name)
-            selectExpr (
+            select (
                 match r with
                 // FIX: Provenance-aware table alias resolution should ensure that `reason` here is linked back to `r` in the SQL generation.
                 // reason.ReasonType is uppercased in the SQL SELECT, and "Order:" is uppercased in .NET! How cool is that?! :)

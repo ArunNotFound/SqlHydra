@@ -146,39 +146,39 @@ type SelectBuilder<'Selected, 'Mapped> () =
         let where = LinqExpressionVisitors.visitWhere<'T> tableMappings whereExpression qualifyColumnWithAlias
         QuerySource<'T, Query>(query.Where(fun w -> where), state.TableMappings)
 
-    /// Sets the SELECT statement and filters the query to include only the selected tables
-    [<CustomOperation("select", MaintainsVariableSpace = true, AllowIntoPattern = true)>]
-    member this.Select (state: QuerySource<'T, Query>, [<ProjectionParameter>] selectExpression: Expression<Func<'T, 'Selected>>) =
-        let selections = LinqExpressionVisitors.visitSelect<'T,'Selected> selectExpression
+    ///// Sets the SELECT statement and filters the query to include only the selected tables
+    ////[<CustomOperation("select", MaintainsVariableSpace = true, AllowIntoPattern = true)>]
+    //member this.Select (state: QuerySource<'T, Query>, [<ProjectionParameter>] selectExpression: Expression<Func<'T, 'Selected>>) =
+    //    let selections = LinqExpressionVisitors.visitSelect<'T,'Selected> selectExpression
 
-        let queryWithSelectedColumns =
-            selections
-            |> List.fold (fun (q: Query) -> function
-                | LinqExpressionVisitors.SelectedTable (tableAlias, tableType) ->
-                    // Explicitly select all columns in generated table record type.
-                    // This avoids table scans due to 'SELECT *', and avoids potential errors when a table has more columns than expected.
-                    //let props =
-                    //    FSharp.Reflection.FSharpType.GetRecordFields(tableType)
-                    //    |> Array.map (fun p -> $"%s{tableAlias}.%s{p.Name}")
-                    //q.Select(props)
+    //    let queryWithSelectedColumns =
+    //        selections
+    //        |> List.fold (fun (q: Query) -> function
+    //            | LinqExpressionVisitors.SelectedTable (tableAlias, tableType) ->
+    //                // Explicitly select all columns in generated table record type.
+    //                // This avoids table scans due to 'SELECT *', and avoids potential errors when a table has more columns than expected.
+    //                //let props =
+    //                //    FSharp.Reflection.FSharpType.GetRecordFields(tableType)
+    //                //    |> Array.map (fun p -> $"%s{tableAlias}.%s{p.Name}")
+    //                //q.Select(props)
 
-                    // Bug fix: temporarily revert to * until option types are properly implemented.
-                    // `tableType` was not properly unwrapping option types, causing a runtime error.
-                    // For example, left joining a table creates an option type, which should be unwrapped.
-                    q.Select($"%s{tableAlias}.*")
+    //                // Bug fix: temporarily revert to * until option types are properly implemented.
+    //                // `tableType` was not properly unwrapping option types, causing a runtime error.
+    //                // For example, left joining a table creates an option type, which should be unwrapped.
+    //                q.Select($"%s{tableAlias}.*")
 
-                | LinqExpressionVisitors.SelectedColumn (tableAlias, column, _, _, _) ->
-                    // Select a single column
-                    q.Select($"%s{tableAlias}.%s{column}")
-                | LinqExpressionVisitors.SelectedExpression sqlFragment ->
-                    q.SelectRaw(sqlFragment)
-            ) state.Query
+    //            | LinqExpressionVisitors.SelectedColumn (tableAlias, column, _, _, _) ->
+    //                // Select a single column
+    //                q.Select($"%s{tableAlias}.%s{column}")
+    //            | LinqExpressionVisitors.SelectedExpression sqlFragment ->
+    //                q.SelectRaw(sqlFragment)
+    //        ) state.Query
 
-        QuerySource<'Selected, Query>(queryWithSelectedColumns, state.TableMappings)
+    //    QuerySource<'Selected, Query>(queryWithSelectedColumns, state.TableMappings)
 
     /// Sets the SELECT statement using an arbitrary F# expression.
     /// Supports string interpolation, conditionals, and other F# expressions that reference DB columns.
-    [<CustomOperation("selectExpr", MaintainsVariableSpace = true)>]
+    [<CustomOperation("select", MaintainsVariableSpace = true, AllowIntoPattern = true)>]
     member this.SelectExpr (state: QuerySource<'T, Query>, [<ProjectionParameter>] selectExpression: Expression<Func<'T, 'Selected>>) =
         let exprInfo = LinqExpressionVisitors.visitSelectExpr<'T, 'Selected> selectExpression
 

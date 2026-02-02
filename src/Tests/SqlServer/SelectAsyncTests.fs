@@ -23,7 +23,9 @@ let ``selectAsync - no select``() = async {
             for o in Sales.SalesOrderHeader do
             join d in Sales.SalesOrderDetail on (o.SalesOrderID = d.SalesOrderID)
             take 10
-            mapArray $"{o.SalesOrderNumber} - {d.LineTotal} - {d.ModifiedDate.ToShortDateString()}"
+            //mapArray $"{o.SalesOrderNumber} - {d.LineTotal} - {d.ModifiedDate.ToShortDateString()}"
+            select $"{o.SalesOrderNumber} - {d.LineTotal} - {d.ModifiedDate.ToShortDateString()}"
+            toArray
         }
         
     gt0 results
@@ -60,7 +62,9 @@ let ``selectAsync - mapList column``() = async {
         selectAsync db {
             for p in Person.Person do
             take 10
-            mapList p.FirstName
+            //mapList p.FirstName
+            select p.FirstName
+            toList
         }
         
     gt0 results
@@ -72,8 +76,8 @@ let ``selectAsync - select entity - mapSeq column``() = async {
         selectAsync db {
             for p in Person.Person do
             take 10
-            select p
-            mapSeq $"{p.FirstName} {p.LastName}"
+            //mapSeq $"{p.FirstName} {p.LastName}"
+            select $"{p.FirstName} {p.LastName}"
         }
         
     gt0 results
@@ -85,8 +89,10 @@ let ``selectAsync - select columns into - mapList column``() = async {
         selectAsync db {
             for p in Person.Person do
             take 10
-            select (p.FirstName, p.LastName) into (fname, lname)
-            mapList $"{fname} {lname}"
+            //select (p.FirstName, p.LastName) into (fname, lname)
+            //mapList $"{fname} {lname}"
+            select $"{p.FirstName} {p.LastName}"
+            toList
         }
         
     gt0 results
@@ -121,7 +127,8 @@ let ``selectAsync - tryHead - Mapped``() = async {
         selectAsync db {
             for p in Person.Person do
             take 1
-            mapSeq $"{p.FirstName} {p.LastName}"
+            //mapSeq $"{p.FirstName} {p.LastName}"
+            select $"{p.FirstName} {p.LastName}"
             tryHead
         }
         

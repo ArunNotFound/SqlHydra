@@ -942,7 +942,8 @@ let ``Individual column from a leftJoin table should be optional if Some``() = t
             leftJoin sr in Sales.SalesOrderHeaderSalesReason on (o.SalesOrderID = sr.Value.SalesOrderID)
             leftJoin r in Sales.SalesReason on (sr.Value.SalesReasonID = r.Value.SalesReasonID)
             where (isNullValue r.Value.Name)
-            select (o.SalesOrderID, Some r.Value.ReasonType, Some r.Value.Name)
+            //select (o.SalesOrderID, Some r.Value.ReasonType, Some r.Value.Name)           // v3 workaround no longer works in v4.
+            select (o.SalesOrderID, r |> Option.map _.ReasonType, r |> Option.map _.Name)   // v4 proper handling
             take 10
         }
 

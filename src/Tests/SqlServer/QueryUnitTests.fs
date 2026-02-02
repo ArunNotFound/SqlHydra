@@ -495,7 +495,7 @@ let ``Correlated Subquery``() =
     sql =!
         "SELECT [od].[SalesOrderID], [od].[ProductID], [od].[OrderQty] FROM [Sales].[SalesOrderDetail] AS [od] \
         WHERE ([od].[OrderQty] = (\
-            SELECT MAX([d].[OrderQty]) FROM [Sales].[SalesOrderDetail] AS [d] WHERE ([d].[ProductID] = [od].[ProductID])\
+            SELECT MAX(d.OrderQty) AS __hydra_expr_0 FROM [Sales].[SalesOrderDetail] AS [d] WHERE ([d].[ProductID] = [od].[ProductID])\
         )) ORDER BY [od].[ProductID]"
 
 [<Test; Ignore("Temporarily ignoring test for emergency fix")>]
@@ -698,7 +698,7 @@ let ``Inline Aggregates``() =
         }
         |> toSql
 
-    sql =! "SELECT COUNT([o].[SalesOrderID]) FROM [Sales].[SalesOrderHeader] AS [o]"
+    sql =! "SELECT COUNT(o.SalesOrderID) AS __hydra_expr_0 FROM [Sales].[SalesOrderHeader] AS [o]"
 
 [<Test>]
 let ``Implicit Casts``() = 
@@ -781,12 +781,13 @@ let ``Underscore Assignment Edge Case - insert - should fail with not supported`
     | ex -> Assert.Fail("Should fail with NotSupportedException")
 
 [<Test>]
-let ``Individual column from a leftJoin table should be optional if Some``() = 
+let ``Individual column from a leftJoin table should be optional``() = 
     let query = 
         select {
             for o in Sales.SalesOrderHeader do
             leftJoin d in Sales.SalesOrderDetail on (o.SalesOrderID = d.Value.SalesOrderID)
-            select (Some d.Value.OrderQty)
+            //select (Some d.Value.OrderQty)          // v3 workaround fails in v4
+            select (d |> Option.map _.OrderQty)   // this works
         }
         
     let sql = query |> toSql
@@ -931,7 +932,7 @@ let ``selectExpr Single Column``() =
     let sql =
         select {
             for p in Person.Person do
-            selectExpr p.FirstName
+            select p.FirstName
         }
         |> toSql
 
@@ -942,7 +943,7 @@ let ``selectExpr Two Columns``() =
     let sql =
         select {
             for p in Person.Person do
-            selectExpr (p.FirstName, p.LastName)
+            select (p.FirstName, p.LastName)
         }
         |> toSql
 
@@ -953,7 +954,7 @@ let ``selectExpr Deduplicates Columns``() =
     let sql =
         select {
             for p in Person.Person do
-            selectExpr (p.FirstName, p.FirstName)
+            select (p.FirstName, p.FirstName)
         }
         |> toSql
 
@@ -972,7 +973,7 @@ let ``selectExpr Complex`` () =
         select {
             for p in Person.Person do
             take 10
-            selectExpr (
+            select (
                 if p.FirstName = "John" 
                 then  $"Is John"
                 else "Is not john"
@@ -990,7 +991,7 @@ let ``selectExpr - leftJoin with match`` () =
             for o in Sales.SalesOrderHeader do
             leftJoin sr in Sales.SalesOrderHeaderSalesReason on (o.SalesOrderID = sr.Value.SalesOrderID)
             leftJoin r in Sales.SalesReason on (sr.Value.SalesReasonID = r.Value.SalesReasonID)
-            selectExpr (
+            select (
                 match r with
                 | Some reason -> $"Order: {o.SalesOrderID}, Reason: {reason.ReasonType}\n"
                 | None -> "No Reason Given"
@@ -1007,7 +1008,7 @@ let ``selectExpr - leftJoin column-only`` () =
             for o in Sales.SalesOrderHeader do
             leftJoin sr in Sales.SalesOrderHeaderSalesReason on (o.SalesOrderID = sr.Value.SalesOrderID)
             leftJoin r in Sales.SalesReason on (sr.Value.SalesReasonID = r.Value.SalesReasonID)
-            selectExpr (
+            select (
                 o.AccountNumber,
                 r |> Option.map _.ReasonType,
                 r |> Option.map _.Name
