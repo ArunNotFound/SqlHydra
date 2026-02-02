@@ -457,4 +457,4 @@ let ``Inline Aggregates``() =
         }
         |> toSql
 
-    sql =! "SELECT COUNT(o.ORDER_ID) AS __hydra_expr_0 FROM \"OT\".\"ORDERS\" \"o\""
+    sql =! "SELECT COUNT(\"o\".\"ORDER_ID\") AS __hydra_expr_0 FROM \"OT\".\"ORDERS\" \"o\""
