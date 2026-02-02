@@ -495,7 +495,7 @@ let ``Correlated Subquery``() =
     sql =!
         "SELECT [od].[SalesOrderID], [od].[ProductID], [od].[OrderQty] FROM [Sales].[SalesOrderDetail] AS [od] \
         WHERE ([od].[OrderQty] = (\
-            SELECT MAX(d.OrderQty) AS __hydra_expr_0 FROM [Sales].[SalesOrderDetail] AS [d] WHERE ([d].[ProductID] = [od].[ProductID])\
+            SELECT MAX([d].[OrderQty]) AS __hydra_expr_0 FROM [Sales].[SalesOrderDetail] AS [d] WHERE ([d].[ProductID] = [od].[ProductID])\
         )) ORDER BY [od].[ProductID]"
 
 [<Test; Ignore("Temporarily ignoring test for emergency fix")>]
@@ -698,7 +698,7 @@ let ``Inline Aggregates``() =
         }
         |> toSql
 
-    sql =! "SELECT COUNT(o.SalesOrderID) AS __hydra_expr_0 FROM [Sales].[SalesOrderHeader] AS [o]"
+    sql =! "SELECT COUNT([o].[SalesOrderID]) AS __hydra_expr_0 FROM [Sales].[SalesOrderHeader] AS [o]"
 
 [<Test>]
 let ``Implicit Casts``() = 

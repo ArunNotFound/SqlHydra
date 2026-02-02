@@ -264,7 +264,7 @@ let ``Correlated Subquery``() =
 
     sql =!
         "SELECT * FROM \"main\".\"SalesOrderHeader\" AS \"od\" WHERE (\"od\".\"OrderDate\" = \
-        (SELECT MAX(d.OrderDate) AS __hydra_expr_0 FROM \"main\".\"SalesOrderHeader\" AS \"d\" \
+        (SELECT MAX(\"d\".\"OrderDate\") AS __hydra_expr_0 FROM \"main\".\"SalesOrderHeader\" AS \"d\" \
         WHERE (\"d\".\"CustomerID\" = \"od\".\"CustomerID\")))"
 
 [<Test>]
