@@ -49,6 +49,15 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
     member this.Connection = conn
     member this.Compiler = compiler
 
+    member this.Provider : SqlHydra.Domain.ProviderType =
+        match compiler with
+        | :? SqlKata.Compilers.SqlServerCompiler -> SqlHydra.Domain.ProviderType.SqlServer
+        | :? SqlKata.Compilers.PostgresCompiler -> SqlHydra.Domain.ProviderType.Npgsql
+        | :? SqlKata.Compilers.MySqlCompiler -> SqlHydra.Domain.ProviderType.MySql
+        | :? SqlKata.Compilers.SqliteCompiler -> SqlHydra.Domain.ProviderType.Sqlite
+        | :? SqlKata.Compilers.OracleCompiler -> SqlHydra.Domain.ProviderType.Oracle
+        | _ -> failwith $"Unsupported compiler type: {compiler.GetType().FullName}"
+
     /// Logs a SqlKata compiled query with a user provided log function.
     /// Ex: queryContext.Logger <- printfn "SQL: %O"
     member this.Logger

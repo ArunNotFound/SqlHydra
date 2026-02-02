@@ -61,37 +61,33 @@ let typeMappingsByName =
 let tryFindTypeMapping (providerTypeName: string, precisionMaybe: int option, scaleMaybe: int option) =
     typeMappingsByName.TryFind (providerTypeName.ToUpper())
     |> Option.map (fun mapping ->
-        // Precision and scale defaults:
-        // https://docs.oracle.com/cd/B28359_01/server.111/b28318/datatype.htm#CNCPT313
-        let precision = precisionMaybe |> Option.defaultValue 38
-        let scale = scaleMaybe |> Option.defaultValue 0
+        match mapping.ColumnTypeAlias with
+        | "NUMBER" ->
+            match precisionMaybe, scaleMaybe with
+            // Untyped NUMBER → double
+            | None, None
+            | Some 0, None
+            | Some 0, Some -127 ->
+                { mapping with ClrType = "double"; DbType = DbType.Double }
 
-        // NUMBER -> CLR mappings:
-        // https://docs.oracle.com/cd/B19306_01/gateways.102/b14270/apa.htm
-        match mapping.ColumnTypeAlias, precision, scale with
-        | "NUMBER", precision, 0 when 0 <= precision && precision < 6 ->
-            { mapping with ClrType = "int16"; DbType = DbType.Int16 }
+            // Fractional → decimal
+            | _, Some s when s > 0 ->
+                { mapping with ClrType = "decimal"; DbType = DbType.Decimal }
 
-        | "NUMBER", precision, 0 when precision < 11 ->
-            { mapping with ClrType = "int"; DbType = DbType.Int32 }
+            // Integer NUMBER
+            | Some p, Some 0 when p <= 9 ->
+                { mapping with ClrType = "int"; DbType = DbType.Int32 }
 
-        | "NUMBER", precision, 0 when precision < 20 ->
-            { mapping with ClrType = "int64"; DbType = DbType.Int64 }
+            | Some p, Some 0 when p <= 18 ->
+                { mapping with ClrType = "int64"; DbType = DbType.Int64 }
 
-        | "NUMBER", precision, 0 when precision >= 20 ->
-            { mapping with ClrType = "decimal"; DbType = DbType.Decimal }
+            // Large integer → decimal
+            | Some _, Some 0 ->
+                { mapping with ClrType = "decimal"; DbType = DbType.Decimal }
 
-        | "NUMBER", precision, scale when scale >= 4 ->
-            { mapping with ClrType = "decimal"; DbType = DbType.Decimal }
-
-        | "NUMBER", precision, scale when 0 <= precision && precision < 8 && scale > 0 ->
-            { mapping with ClrType = "System.Single"; DbType = DbType.Single }
-
-        | "NUMBER", precision, scale when precision < 16 && scale > 0 ->
-            { mapping with ClrType = "double"; DbType = DbType.Double }
-
-        | "NUMBER", precision, scale when precision >= 16 && scale > 0 ->
-            { mapping with ClrType = "decimal"; DbType = DbType.Decimal }
+            // Fallback
+            | _ ->
+                { mapping with ClrType = "decimal"; DbType = DbType.Decimal }
 
         | _ ->
             mapping

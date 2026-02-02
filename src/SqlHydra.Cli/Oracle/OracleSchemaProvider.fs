@@ -5,11 +5,25 @@ open Oracle.ManagedDataAccess.Client
 open SqlHydra.Domain
 open SqlHydra
 
+let getColumnSchema (conn: OracleConnection) = 
+    use cmd = conn.CreateCommand()
+    cmd.CommandText <- """
+        SELECT OWNER, TABLE_NAME, COLUMN_NAME, DATA_TYPE AS DATATYPE, DATA_PRECISION AS PRECISION, DATA_SCALE AS SCALE, NULLABLE 
+        FROM ALL_TAB_COLUMNS 
+        WHERE OWNER NOT IN ('SYS', 'SYSTEM') 
+        ORDER BY OWNER, TABLE_NAME, COLUMN_ID 
+        """    
+    let adapter = new OracleDataAdapter(cmd)
+    let dataTable = new DataTable()
+    adapter.Fill(dataTable) |> ignore
+    dataTable
+
 let getSchema (cfg: Config, isLegacy: bool) : Schema =
     use conn = new OracleConnection(cfg.ConnectionString)
     conn.Open()
     let sTables = conn.GetSchema("Tables", cfg.Filters.TryGetRestrictionsByKey("Tables"))
-    let sColumns = conn.GetSchema("Columns", cfg.Filters.TryGetRestrictionsByKey("Columns"))
+    //let sColumns = conn.GetSchema("Columns", cfg.Filters.TryGetRestrictionsByKey("Columns"))
+    let sColumns = getColumnSchema conn
     let sViews = conn.GetSchema("Views", cfg.Filters.TryGetRestrictionsByKey("Views"))
 
     let systemOwners = 

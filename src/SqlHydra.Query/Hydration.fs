@@ -1,8 +1,10 @@
+/// Replaces the old SqlHydra.Cli generated `HydraReader` class with an internal module.
 module SqlHydra.Query.Hydration
 
 open System
 open System.Data.Common
 open FSharp.Reflection
+open SqlHydra.Domain
 
 /// Tracks ordinal position across joined tables.
 [<Sealed>]
@@ -35,21 +37,129 @@ type OrdinalTracker(reader: DbDataReader) =
         ordinal
 
 /// Module containing methods accessed via reflection. Must be a static class.
+/// Contains some provider-specific exception handling for reading column values.
 type ColumnReadMethods private () =
+    static let mutable provider = SqlServer
+    static member SetProvider(p: ProviderType) = provider <- p
+
+    static member private ConvertOracleProviderType<'T>(value: obj) : 'T =
+        let actual = value.GetType()
+        let t = typeof<'T>
+
+        // -------------------------
+        // OracleDecimal
+        // -------------------------
+        if actual.Name = "OracleDecimal" then
+            let isNull = actual.GetProperty("IsNull").GetValue(value) :?> bool
+            if isNull then Unchecked.defaultof<'T>
+            else
+                if t = typeof<decimal> then
+                    actual.GetProperty("Value").GetValue(value) :?> 'T
+                elif t = typeof<int> then
+                    actual.GetMethod("ToInt32").Invoke(value, [||]) :?> 'T
+                elif t = typeof<int64> then
+                    actual.GetMethod("ToInt64").Invoke(value, [||]) :?> 'T
+                elif t = typeof<double> then
+                    actual.GetMethod("ToDouble").Invoke(value, [||]) :?> 'T
+                elif t = typeof<bool> then
+                    let i = actual.GetMethod("ToInt32").Invoke(value, [||]) :?> int
+                    (i = 1) :> obj :?> 'T
+                else
+                    failwithf "Unsupported OracleDecimal → %s" t.FullName
+
+        // -------------------------
+        // OracleDate
+        // -------------------------
+        elif actual.Name = "OracleDate" then
+            let isNull = actual.GetProperty("IsNull").GetValue(value) :?> bool
+            if isNull then Unchecked.defaultof<'T>
+            else
+                actual.GetProperty("Value").GetValue(value) :?> 'T
+
+        // -------------------------
+        // OracleTimeStamp / OracleTimeStampTZ
+        // -------------------------
+        elif actual.Name.StartsWith("OracleTimeStamp") then
+            let isNull = actual.GetProperty("IsNull").GetValue(value) :?> bool
+            if isNull then Unchecked.defaultof<'T>
+            else
+                actual.GetProperty("Value").GetValue(value) :?> 'T
+
+        // -------------------------
+        // Fallback
+        // -------------------------
+        else
+            value :?> 'T
+
+    static member private ConvertClrOracleValue<'T>(value: obj) : 'T =
+        let t = typeof<'T>
+
+        match value with
+        // double → numeric
+        | :? double as d when t = typeof<decimal> ->
+            decimal d :> obj :?> 'T
+        | :? double as d when t = typeof<int> ->
+            int d :> obj :?> 'T
+        | :? double as d when t = typeof<int64> ->
+            int64 d :> obj :?> 'T
+
+        // int64 → numeric
+        | :? int64 as i when t = typeof<int> ->
+            int i :> obj :?> 'T
+
+        // decimal → numeric
+        | :? decimal as d when t = typeof<int> ->
+            int d :> obj :?> 'T
+        | :? decimal as d when t = typeof<int64> ->
+            int64 d :> obj :?> 'T
+        | :? decimal as d when t = typeof<double> ->
+            double d :> obj :?> 'T
+
+        // fallback
+        | _ ->
+            value :?> 'T
+
+
+    static member private ConvertOracleValue<'T>(value: obj) : 'T =
+        if value = null || value = DBNull.Value then
+            Unchecked.defaultof<'T>
+        else
+            let actual = value.GetType()
+            let t = typeof<'T>
+
+            // Case 1: Oracle provider types
+            if actual.Namespace = "Oracle.ManagedDataAccess.Types" then
+                ColumnReadMethods.ConvertOracleProviderType<'T>(value)
+
+            // Case 2: Oracle returned a CLR primitive (double, int64, etc.)
+            else 
+                ColumnReadMethods.ConvertClrOracleValue<'T>(value)
+
+
+    /// Reads a value from the data reader using `GetFieldValue<T>`, with a provider‑specific fallback for Oracle. Oracle’s ADO.NET provider does not return normal CLR types for many column kinds (such as NUMBER, DATE, and TIMESTAMP). Instead, it exposes provider‑specific wrapper types like OracleDecimal, OracleDate, and OracleTimeStampTZ. These cannot be cast to CLR primitives, so `GetFieldValue<T>` throws an `InvalidCastException`.  
+    /// To keep the hydration pipeline provider‑agnostic, this method catches that specific exception when the active provider is Oracle and converts the underlying Oracle value to the requested CLR type using reflection. All other providers use the standard `GetFieldValue<T>` path.  
+    /// This isolates Oracle‑specific behavior in one place while preserving a clean, generic hydration model for all other providers.
+    static member private TryGetFieldValue<'T>(reader: DbDataReader, ordinal: int) : 'T =
+        try
+            reader.GetFieldValue<'T>(ordinal)
+        with
+        | :? InvalidCastException when provider = Oracle ->
+            ColumnReadMethods.ConvertOracleValue<'T>(reader.GetValue(ordinal))
+
     static member ReadRequired<'T>(reader: DbDataReader, ordinal: int) : obj =
-        reader.GetFieldValue<'T>(ordinal) |> box
+        ColumnReadMethods.TryGetFieldValue<'T>(reader, ordinal) |> box
 
     static member ReadOption<'T>(reader: DbDataReader, ordinal: int) : obj =
         if reader.IsDBNull(ordinal) then box None
-        else reader.GetFieldValue<'T>(ordinal) |> Some |> box
+        else ColumnReadMethods.TryGetFieldValue<'T>(reader, ordinal) |> Some |> box
 
     static member ReadNullableStruct<'T when 'T : struct and 'T :> ValueType and 'T : (new: unit -> 'T)>(reader: DbDataReader, ordinal: int) : obj =
         if reader.IsDBNull(ordinal) then Nullable() |> box
-        else Nullable(reader.GetFieldValue<'T>(ordinal)) |> box
+        else Nullable(ColumnReadMethods.TryGetFieldValue<'T>(reader, ordinal)) |> box
 
     static member ReadNullableObj<'T when 'T : not struct>(reader: DbDataReader, ordinal: int) : obj =
         if reader.IsDBNull(ordinal) then null |> box
-        else reader.GetFieldValue<'T>(ordinal) |> box
+        else ColumnReadMethods.TryGetFieldValue<'T>(reader, ordinal) |> box
 
 /// Determines if a type is Option<_>.
 let private isOptionType (t: Type) =
@@ -143,9 +253,10 @@ let private buildEntityReadFn (tracker: OrdinalTracker) (entityType: Type) : (un
 
 /// Builds a function that reads one row from the reader and returns 'T.
 /// Called once per query (after reader is opened), returned fn is called per row.
-let buildRowReader<'T> (reader: DbDataReader) : (unit -> 'T) =
+let buildRowReader<'T> (provider: ProviderType) (reader: DbDataReader) : (unit -> 'T) =
     let t = typeof<'T>
     let tracker = OrdinalTracker(reader)
+    ColumnReadMethods.SetProvider(provider)
 
     if FSharpType.IsTuple(t) then
         let elementTypes = FSharpType.GetTupleElements(t)
@@ -159,9 +270,10 @@ let buildRowReader<'T> (reader: DbDataReader) : (unit -> 'T) =
             readFn() :?> 'T
 
 /// Builds a function for selectExpr queries using leaf metadata.
-let internal buildSelectExprReader (reader: DbDataReader) (exprInfo: LinqExpressionVisitors.SelectExprInfo) : (unit -> obj[]) =
+let internal buildSelectExprReader (provider: ProviderType) (reader: DbDataReader) (exprInfo: LinqExpressionVisitors.SelectExprInfo) : (unit -> obj[]) =
     let tracker = OrdinalTracker(reader)
     let leafTupleType = exprInfo.LeafTupleType
+    ColumnReadMethods.SetProvider(provider)
 
     if FSharpType.IsTuple(leafTupleType) then
         let elementTypes = FSharpType.GetTupleElements(leafTupleType)

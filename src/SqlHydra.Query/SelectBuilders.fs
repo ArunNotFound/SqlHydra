@@ -567,7 +567,7 @@ type SelectTaskBuilder<'Selected, 'Mapped> (ct: ContextType) =
             try
                 use cmd = ctx.BuildCommand(query)
                 use! reader = cmd.ExecuteReaderAsync(this.CancellationToken)
-                let readEntity = Hydration.buildRowReader<'Selected> reader
+                let readEntity = Hydration.buildRowReader<'Selected> ctx.Provider reader
                 let results = ResizeArray<'Selected>()
 
                 let! hasMore = reader.ReadAsync(this.CancellationToken)
@@ -588,7 +588,7 @@ type SelectTaskBuilder<'Selected, 'Mapped> (ct: ContextType) =
             try
                 use cmd = ctx.BuildCommand(query)
                 use! reader = cmd.ExecuteReaderAsync(this.CancellationToken)
-                let readEntity = Hydration.buildRowReader<'Selected> reader
+                let readEntity = Hydration.buildRowReader<'Selected> ctx.Provider reader
                 let results = ResizeArray<'Mapped>()
 
                 let! hasMore = reader.ReadAsync(this.CancellationToken)
@@ -609,7 +609,7 @@ type SelectTaskBuilder<'Selected, 'Mapped> (ct: ContextType) =
             try
                 use cmd = ctx.BuildCommand(query)
                 use! reader = cmd.ExecuteReaderAsync(this.CancellationToken)
-                let readRow = Hydration.buildSelectExprReader reader exprInfo
+                let readRow = Hydration.buildSelectExprReader ctx.Provider reader exprInfo
 
                 let results = ResizeArray<'Selected>()
                 let! hasMore = reader.ReadAsync(this.CancellationToken)
@@ -632,7 +632,7 @@ type SelectTaskBuilder<'Selected, 'Mapped> (ct: ContextType) =
             try
                 use cmd = ctx.BuildCommand(query)
                 use! reader = cmd.ExecuteReaderAsync(this.CancellationToken)
-                let readRow = Hydration.buildSelectExprReader reader exprInfo
+                let readRow = Hydration.buildSelectExprReader ctx.Provider reader exprInfo
 
                 let results = ResizeArray<'Mapped>()
                 let! hasMore = reader.ReadAsync(this.CancellationToken)
@@ -732,7 +732,7 @@ type SelectAsyncBuilder<'Selected, 'Mapped> (ct: ContextType) =
                 let! asyncCancel = Async.CancellationToken
                 let cancel = if this.CancellationToken <> CancellationToken.None then this.CancellationToken else asyncCancel
                 use! reader = cmd.ExecuteReaderAsync(cancel) |> Async.AwaitTask
-                let readEntity = Hydration.buildRowReader<'Selected> (reader :?> DbDataReader)
+                let readEntity = Hydration.buildRowReader<'Selected> ctx.Provider (reader : DbDataReader)
                 let results = ResizeArray<'Selected>()
 
                 let! hasMore = reader.ReadAsync(cancel) |> Async.AwaitTask
@@ -755,7 +755,7 @@ type SelectAsyncBuilder<'Selected, 'Mapped> (ct: ContextType) =
                 let! asyncCancel = Async.CancellationToken
                 let cancel = if this.CancellationToken <> CancellationToken.None then this.CancellationToken else asyncCancel
                 use! reader = cmd.ExecuteReaderAsync(cancel) |> Async.AwaitTask
-                let readEntity = Hydration.buildRowReader<'Selected> (reader :?> DbDataReader)
+                let readEntity = Hydration.buildRowReader<'Selected> ctx.Provider (reader : DbDataReader)
                 let results = ResizeArray<'Mapped>()
 
                 let! hasMore = reader.ReadAsync(cancel) |> Async.AwaitTask
@@ -778,7 +778,7 @@ type SelectAsyncBuilder<'Selected, 'Mapped> (ct: ContextType) =
                 let! asyncCancel = Async.CancellationToken
                 let cancel = if this.CancellationToken <> CancellationToken.None then this.CancellationToken else asyncCancel
                 use! reader = cmd.ExecuteReaderAsync(cancel) |> Async.AwaitTask
-                let readRow = Hydration.buildSelectExprReader (reader :?> DbDataReader) exprInfo
+                let readRow = Hydration.buildSelectExprReader ctx.Provider (reader : DbDataReader) exprInfo
 
                 let results = ResizeArray<'Selected>()
                 let! hasMore = reader.ReadAsync(cancel) |> Async.AwaitTask
@@ -803,7 +803,7 @@ type SelectAsyncBuilder<'Selected, 'Mapped> (ct: ContextType) =
                 let! asyncCancel = Async.CancellationToken
                 let cancel = if this.CancellationToken <> CancellationToken.None then this.CancellationToken else asyncCancel
                 use! reader = cmd.ExecuteReaderAsync(cancel) |> Async.AwaitTask
-                let readRow = Hydration.buildSelectExprReader (reader :?> DbDataReader) exprInfo
+                let readRow = Hydration.buildSelectExprReader ctx.Provider (reader : DbDataReader) exprInfo
 
                 let results = ResizeArray<'Mapped>()
                 let! hasMore = reader.ReadAsync(cancel) |> Async.AwaitTask
