@@ -262,7 +262,7 @@ let ``Correlated Subquery``() =
 
     sql =!
         "SELECT * FROM \"sales\".\"salesorderheader\" AS \"od\" WHERE (\"od\".\"orderdate\" = \
-        (SELECT MAX(\"d\".\"orderdate\") FROM \"sales\".\"salesorderheader\" AS \"d\" \
+        (SELECT MAX(\"d\".\"orderdate\") AS __hydra_expr_0 FROM \"sales\".\"salesorderheader\" AS \"d\" \
         WHERE (\"d\".\"customerid\" = \"od\".\"customerid\")))"
 
 [<Test>]
@@ -411,4 +411,4 @@ let ``Inline Aggregates``() =
         }
         |> toSql
 
-    sql =! "SELECT COUNT(\"o\".\"salesorderid\") FROM \"sales\".\"salesorderheader\" AS \"o\""
+    sql =! "SELECT COUNT(\"o\".\"salesorderid\") AS __hydra_expr_0 FROM \"sales\".\"salesorderheader\" AS \"o\""
