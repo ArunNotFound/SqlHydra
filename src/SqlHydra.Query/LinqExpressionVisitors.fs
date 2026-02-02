@@ -1719,7 +1719,7 @@ let visitSelectExpr<'T, 'Selected> (selectExpression: Expression<Func<'T, 'Selec
         | _ -> exp
 
     and rewriteSqlFunction (m: MethodCallExpression) (originalExp: Expression) =
-        let qualifyCol alias (mem: MemberInfo) = $"{alias}.{mem.Name}"
+        let qualifyCol alias (mem: MemberInfo) = $"[{alias}].[{mem.Name}]"
         /// Like visitSqlFn but uses provenance-aware alias resolution
         /// so that pattern variables (e.g., from match) resolve to
         /// the correct table alias.
