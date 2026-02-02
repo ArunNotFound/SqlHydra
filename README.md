@@ -11,7 +11,7 @@ Type-safe SQL generation for F#. Generate types from your database, query with s
 
 ## Quick Start
 
-**1. Install the CLI tool:**
+**1. Install the CLI tool locally:**
 ```bash
 dotnet new tool-manifest
 dotnet tool install SqlHydra.Cli
