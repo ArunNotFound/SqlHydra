@@ -34,10 +34,7 @@ SqlHydra.Cli now generates a DB‑specific `QueryContextFactory` for each genera
 
 Use it to create a strongly‑typed query context:
 ```fsharp
-let db = 
-    AdventureWorks.QueryContextFactory.Create(
-        "Server=.;Database=AdventureWorks;Trusted_Connection=True;", 
-        printfn "SQL: %O") // Optional output parameter
+let db = AdventureWorks.QueryContextFactory.Create(connStr, printfn "SQL: %O") // Optional SQL output logging
 ```
 
 **5. Write your first query:**
