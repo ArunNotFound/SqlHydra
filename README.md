@@ -43,8 +43,8 @@ let db =
 **5. Write your first query:**
 
 ```fsharp
-open SqlHydra.Query // 1. Open the query library first.
-open AdventureWorks // 2. Open your generated namespace.
+open SqlHydra.Query
+open AdventureWorks
 
 // Query with full type safety
 let getProducts minPrice =
