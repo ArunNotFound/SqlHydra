@@ -17,6 +17,15 @@ open Sqlite.AdventureWorksNet9
 open Sqlite.AdventureWorksNet10
 #endif
 
+/// Ad-hoc schema module for DateOnly/TimeOnly round-trip tests (table stored in SQLite as TEXT).
+module dbo =
+    [<CLIMutable>]
+    type DateOnlyTest =
+        { [<SqlHydra.ProviderDbType("Date")>]
+          date: System.DateOnly }
+
+    let DateOnlyTest = table<DateOnlyTest>
+
 let stubbedErrorLog = 
     {
         main.ErrorLog.ErrorLogID = 0L // Exclude
@@ -408,5 +417,42 @@ let ``SqlFn - SQLite functions smoke test``() = task {
     Assert.That(len, Is.GreaterThan(0))
     Assert.That(upperCity, Is.EqualTo(city.ToUpper()))
     Assert.That(line2, Is.Not.Null)
+}
+
+/// Reproduces https://github.com/JordanMarr/SqlHydra/issues/123
+/// SQLite stores DateOnly as a datetime string (e.g. '2024-06-20 00:00:00'),
+/// which causes DateOnly.Parse to fail with a FormatException on read-back.
+[<Test>]
+let ``DateOnly round-trip in SQLite``() = task {
+    // Create an in-memory SQLite database with a DateOnly column (stored as text)
+    use conn = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:")
+    do! conn.OpenAsync()
+
+    // Attach an in-memory database as 'dbo' so that [dbo].[DateOnlyTest] resolves
+    use attachCmd = conn.CreateCommand(CommandText = "ATTACH DATABASE ':memory:' AS 'dbo'")
+    attachCmd.ExecuteNonQuery() |> ignore
+
+    use cmd = conn.CreateCommand(CommandText = "CREATE TABLE [dbo].[DateOnlyTest] (date TEXT NOT NULL)")
+    cmd.ExecuteNonQuery() |> ignore
+
+    let compiler = SqlKata.Compilers.SqliteCompiler()
+    use ctx = new QueryContext(conn, compiler)
+
+    let expected = System.DateOnly(2024, 6, 20)
+
+    let! _ =
+        insertTask ctx {
+            into dbo.DateOnlyTest
+            entity { date = expected }
+        }
+
+    let! results =
+        selectTask ctx {
+            for row in dbo.DateOnlyTest do
+            toArray
+        }
+
+    results.Length =! 1
+    results.[0].date =! expected
 }
 

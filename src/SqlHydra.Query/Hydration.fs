@@ -145,6 +145,17 @@ type ColumnReadMethods private () =
         with
         | :? InvalidCastException when provider = Oracle ->
             ColumnReadMethods.ConvertOracleValue<'T>(reader.GetValue(ordinal))
+#if NET6_0_OR_GREATER
+        | (:? InvalidCastException | :? FormatException) when typeof<'T> = typeof<DateOnly> ->
+            // SQLite (and possibly other providers) may store dates as datetime strings
+            // (e.g. '2022-01-24 00:00:00') which DateOnly.Parse/GetFieldValue rejects.
+            // Fall back to reading as DateTime and converting.
+            let dt = reader.GetDateTime(ordinal)
+            DateOnly.FromDateTime(dt) :> obj :?> 'T
+        | (:? InvalidCastException | :? FormatException) when typeof<'T> = typeof<TimeOnly> ->
+            let dt = reader.GetDateTime(ordinal)
+            TimeOnly.FromDateTime(dt) :> obj :?> 'T
+#endif
 
     static member ReadRequired<'T>(reader: DbDataReader, ordinal: int) : obj =
         ColumnReadMethods.TryGetFieldValue<'T>(reader, ordinal) |> box
