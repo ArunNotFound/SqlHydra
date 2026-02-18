@@ -248,70 +248,19 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
             return entities |> Seq.tryHead
         }
 
-    /// Adds a parameter to the command, handling QueryParameter type and DateOnly/TimeOnly conversion.
-    member private this.AddParameter(cmd: DbCommand, name: string, value: obj) =
-        let p = cmd.CreateParameter()
-        p.ParameterName <- name
-        p.Value <-
-            match value with
-            | :? QueryParameter as qp ->
-                do setParameterDbType p qp
-                qp.Value
-            | _ -> value
-            |> KataUtils.convertIfDateOnlyTimeOnly
-        cmd.Parameters.Add(p) |> ignore
-
-    /// Brackets a table name like "dbo.ErrorLog" to "[dbo].[ErrorLog]".
-    member private this.BracketTable(table: string) =
-        table.Split('.')
-        |> Array.map (fun part -> $"[{part}]")
-        |> fun parts -> String.Join(".", parts)
-
-    /// Applies InsertOrUpdateOnUnique wrapping to a command: wraps INSERT in TRY/CATCH with UPDATE fallback.
-    member private this.ApplyInsertOrUpdateOnUnique<'T, 'InsertReturn>(cmd: DbCommand, spec: InsertQuerySpec<'T, 'InsertReturn>, keyFields: string list, updateFields: string list) =
-        let entity = spec.Entities |> List.head
-        let properties = FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>)
-        let propMap = properties |> Array.map (fun p -> p.Name, p) |> Map.ofArray
-
-        let bracketedTable = this.BracketTable(spec.Table)
-
-        let setClause =
-            updateFields
-            |> List.map (fun col -> $"[{col}] = @__update_{col}")
-            |> fun parts -> String.Join(", ", parts)
-
-        let whereClause =
-            keyFields
-            |> List.map (fun col -> $"t.[{col}] = @__key_{col}")
-            |> fun parts -> String.Join(" AND ", parts)
-
-        let insertSql = cmd.CommandText
-
-        cmd.CommandText <- $"""
-            BEGIN TRY
-                {insertSql}
-            END TRY
-            BEGIN CATCH
-                DECLARE @err INT = ERROR_NUMBER();
-                IF @err NOT IN (2627, 2601) THROW;
-                UPDATE t SET {setClause}
-                FROM {bracketedTable} AS t
-                WHERE {whereClause};
-                IF @@ROWCOUNT = 0
-                BEGIN
-                    {insertSql}
-                END
-            END CATCH;"""
-
-        // Add update parameters
-        for col in updateFields do
-            let prop = propMap[col]
-            this.AddParameter(cmd, $"@__update_{col}", KataUtils.getQueryParameterForEntity entity prop)
-
-        // Add key parameters
-        for col in keyFields do
-            let prop = propMap[col]
-            this.AddParameter(cmd, $"@__key_{col}", KataUtils.getQueryParameterForEntity entity prop)
+    /// Creates a DbParameter from a name and value, handling QueryParameter type and DateOnly/TimeOnly conversion.
+    member private this.CreateParam(cmd: DbCommand) =
+        fun (name: string) (value: obj) ->
+            let p = cmd.CreateParameter()
+            p.ParameterName <- name
+            p.Value <-
+                match value with
+                | :? QueryParameter as qp ->
+                    do setParameterDbType p qp
+                    qp.Value
+                | _ -> value
+                |> KataUtils.convertIfDateOnlyTimeOnly
+            p :> Data.IDbDataParameter
 
     member this.Insert<'T, 'InsertReturn> (iq: InsertQuery<'T, 'InsertReturn>) =
         let compiledQuery = iq.ToKataQuery() |> compiler.Compile
@@ -322,7 +271,15 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
         // Handle InsertOrUpdateOnUnique separately (SQL Server TRY/CATCH pattern)
         match iq.Spec.InsertType with
         | InsertOrUpdateOnUnique (keyFields, updateFields) ->
-            this.ApplyInsertOrUpdateOnUnique(cmd, iq.Spec, keyFields, updateFields)
+            let entity = iq.Spec.Entities |> List.head
+            let propMap = FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>) |> Array.map (fun p -> p.Name, p) |> Map.ofArray
+            let getColumnValue col = KataUtils.getQueryParameterForEntity entity propMap[col]
+            let existingParams = [ for i in 0 .. cmd.Parameters.Count - 1 -> cmd.Parameters[i] :> Data.IDbDataParameter ]
+            let newSql, allParams =
+                InsertOrUpdateOnUnique.apply iq.Spec.Table keyFields updateFields cmd.CommandText existingParams (this.CreateParam cmd) getColumnValue
+            cmd.CommandText <- newSql
+            cmd.Parameters.Clear()
+            for p in allParams do cmd.Parameters.Add(p) |> ignore
             this.LogCommand(compiledQuery, cmd)
             let results = cmd.ExecuteNonQuery()
             Convert.ChangeType(results, typeof<'InsertReturn>) :?> 'InsertReturn
@@ -400,7 +357,15 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
             // Handle InsertOrUpdateOnUnique separately (SQL Server TRY/CATCH pattern)
             match iq.Spec.InsertType with
             | InsertOrUpdateOnUnique (keyFields, updateFields) ->
-                this.ApplyInsertOrUpdateOnUnique(cmd, iq.Spec, keyFields, updateFields)
+                let entity = iq.Spec.Entities |> List.head
+                let propMap = FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>) |> Array.map (fun p -> p.Name, p) |> Map.ofArray
+                let getColumnValue col = KataUtils.getQueryParameterForEntity entity propMap[col]
+                let existingParams = [ for i in 0 .. cmd.Parameters.Count - 1 -> cmd.Parameters[i] :> Data.IDbDataParameter ]
+                let newSql, allParams =
+                    InsertOrUpdateOnUnique.apply iq.Spec.Table keyFields updateFields cmd.CommandText existingParams (this.CreateParam cmd) getColumnValue
+                cmd.CommandText <- newSql
+                cmd.Parameters.Clear()
+                for p in allParams do cmd.Parameters.Add(p) |> ignore
                 this.LogCommand(compiledQuery, cmd)
                 let! results = cmd.ExecuteNonQueryAsync(cancel)
                 return Convert.ChangeType(results, typeof<'InsertReturn>) :?> 'InsertReturn
