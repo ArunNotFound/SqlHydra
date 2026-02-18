@@ -1,14 +1,23 @@
 namespace SqlHydra.Query
 
 open System
-open System.Data
 open System.Data.Common
-open System.IO
 open System.Threading
 open SqlKata
+open SqlHydra.Domain
 
 /// Contains methods that compile and read a query.
 type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
+    
+    let provider =
+        match compiler with
+        | :? SqlKata.Compilers.SqlServerCompiler -> SqlServer
+        | :? SqlKata.Compilers.PostgresCompiler -> Npgsql
+        | :? SqlKata.Compilers.MySqlCompiler -> MySql
+        | :? SqlKata.Compilers.SqliteCompiler -> Sqlite
+        | :? SqlKata.Compilers.OracleCompiler -> Oracle
+        | _ -> failwith $"Unsupported compiler type: {compiler.GetType().FullName}"
+
     let setProviderDbType (param: DbParameter) (propertyName: string) (providerDbType: string) =
         let property = param.GetType().GetProperty(propertyName)
         let dbTypeSetter = property.GetSetMethod()
@@ -16,14 +25,13 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
         dbTypeSetter.Invoke(param, [|value|]) |> ignore
         
     let setParameterDbType (param: DbParameter) (qp: QueryParameter) =
-        match qp.ProviderDbType, compiler with
-        | Some type', :? SqlKata.Compilers.PostgresCompiler ->
+        match provider, qp.ProviderDbType with
+        | Npgsql, Some type' ->
             setProviderDbType param "NpgsqlDbType" type'
-        | Some "SqlHierarchyId", :? SqlKata.Compilers.SqlServerCompiler ->
-            //setProviderDbType param "SqlDbType" "Udt"
+        | SqlServer, Some "SqlHierarchyId" ->
             param.GetType().GetProperty("UdtTypeName").SetValue(param, "hierarchyid") |> ignore
-        | Some type', :? SqlKata.Compilers.SqlServerCompiler ->
-            setProviderDbType param "SqlDbType" type'    
+        | SqlServer, Some type' ->
+            setProviderDbType param "SqlDbType" type'
         | _ -> ()
 
     /// Creates a DbParameter from a name and value, handling QueryParameter type and DateOnly/TimeOnly conversion.
@@ -62,15 +70,7 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
     
     member this.Connection = conn
     member this.Compiler = compiler
-
-    member this.Provider : SqlHydra.Domain.ProviderType =
-        match compiler with
-        | :? SqlKata.Compilers.SqlServerCompiler -> SqlHydra.Domain.ProviderType.SqlServer
-        | :? SqlKata.Compilers.PostgresCompiler -> SqlHydra.Domain.ProviderType.Npgsql
-        | :? SqlKata.Compilers.MySqlCompiler -> SqlHydra.Domain.ProviderType.MySql
-        | :? SqlKata.Compilers.SqliteCompiler -> SqlHydra.Domain.ProviderType.Sqlite
-        | :? SqlKata.Compilers.OracleCompiler -> SqlHydra.Domain.ProviderType.Oracle
-        | _ -> failwith $"Unsupported compiler type: {compiler.GetType().FullName}"
+    member this.Provider = provider
 
     /// Logs a SqlKata compiled query with a user provided log function.
     /// Ex: queryContext.Logger <- printfn "SQL: %O"
@@ -301,21 +301,21 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
             cmd.CommandText <- cmd.CommandText |> applyOnConflict
 
             // Fix postgres identity
-            if compiler :? SqlKata.Compilers.PostgresCompiler
+            if provider = Npgsql
             then cmd.CommandText <- cmd.CommandText |> Fixes.Postgres.fixIdentityQuery identityField
 
             // Fix oracle identity
-            elif compiler  :? SqlKata.Compilers.OracleCompiler
+            elif provider = Oracle
             then cmd.CommandText <- cmd.CommandText |> Fixes.Oracle.fixIdentityQuery identityField
 
             // Fix mssql guid identity
-            elif compiler :? SqlKata.Compilers.SqlServerCompiler && typeof<'InsertReturn> = typeof<System.Guid>
+            elif provider = SqlServer && typeof<'InsertReturn> = typeof<System.Guid>
             then cmd.CommandText <- cmd.CommandText |> Fixes.MsSql.fixGuidIdentityQuery identityField
 
             this.LogCommand(compiledQuery, cmd)
 
             // Execute insert and return identity
-            if compiler :? SqlKata.Compilers.OracleCompiler then
+            if provider = Oracle then
                 let outputParam = cmd.CreateParameter()
                 outputParam.ParameterName <- "outputParam"
                 outputParam.DbType <- Data.DbType.Decimal
@@ -334,7 +334,7 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
             cmd.CommandText <- cmd.CommandText |> applyOnConflict
 
             // Fix Oracle multi-insert query
-            if compiler :? SqlKata.Compilers.OracleCompiler && iq.Spec.Entities.Length > 1
+            if provider = Oracle && iq.Spec.Entities.Length > 1
             then cmd.CommandText <- cmd.CommandText |> Fixes.Oracle.fixMultiInsertQuery
 
             this.LogCommand(compiledQuery, cmd)
@@ -387,21 +387,21 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
                 cmd.CommandText <- cmd.CommandText |> applyOnConflict
 
                 // Fix postgres identity
-                if compiler :? SqlKata.Compilers.PostgresCompiler
+                if provider = Npgsql
                 then cmd.CommandText <- cmd.CommandText |> Fixes.Postgres.fixIdentityQuery identityField
 
                 // Fix oracle identity
-                elif compiler :? SqlKata.Compilers.OracleCompiler
+                elif provider = Oracle
                 then cmd.CommandText <- cmd.CommandText |> Fixes.Oracle.fixIdentityQuery identityField
 
                 // Fix mssql guid identity
-                elif compiler :? SqlKata.Compilers.SqlServerCompiler && typeof<'InsertReturn> = typeof<System.Guid>
+                elif provider = SqlServer && typeof<'InsertReturn> = typeof<System.Guid>
                 then cmd.CommandText <- cmd.CommandText |> Fixes.MsSql.fixGuidIdentityQuery identityField
 
                 this.LogCommand(compiledQuery, cmd)
 
                 // Execute insert and return identity
-                if compiler :? SqlKata.Compilers.OracleCompiler then
+                if provider = Oracle then
                     let outputParam = cmd.CreateParameter()
                     outputParam.ParameterName <- "outputParam"
                     outputParam.DbType <- Data.DbType.Decimal
@@ -423,7 +423,7 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
                 cmd.CommandText <- OutputClause.inserted outputFields cmd.CommandText
 
                 // Fix Oracle multi-insert query
-                if compiler :? SqlKata.Compilers.OracleCompiler && iq.Spec.Entities.Length > 1
+                if provider = Oracle && iq.Spec.Entities.Length > 1
                 then cmd.CommandText <- cmd.CommandText |> Fixes.Oracle.fixMultiInsertQuery
 
                 this.LogCommand(compiledQuery, cmd)
@@ -435,7 +435,7 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
                 cmd.CommandText <- cmd.CommandText |> applyOnConflict
 
                 // Fix Oracle multi-insert query
-                if compiler :? SqlKata.Compilers.OracleCompiler && iq.Spec.Entities.Length > 1
+                if provider = Oracle && iq.Spec.Entities.Length > 1
                 then cmd.CommandText <- cmd.CommandText |> Fixes.Oracle.fixMultiInsertQuery
 
                 this.LogCommand(compiledQuery, cmd)
