@@ -144,22 +144,7 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
         cmd |> this.TrySetTransaction
         cmd.CommandText <- compiledQuery.Sql
         for kvp in compiledQuery.NamedBindings do
-            let p = cmd.CreateParameter()
-            
-            p.ParameterName <- kvp.Key
-            
-            p.Value <-
-                match kvp.Value with
-                | :? QueryParameter as qp ->
-                    do setParameterDbType p qp
-                    qp.Value
-                | _ ->
-                    kvp.Value
-                
-                // SqlHydra must manually handle DateOnly and TimeOnly conversions of all parameters
-                |> KataUtils.convertIfDateOnlyTimeOnly
-           
-            cmd.Parameters.Add(p) |> ignore
+            cmd.Parameters.Add(createParam cmd kvp.Key kvp.Value) |> ignore
         cmd
 
     /// Builds an ADO.NET DbCommand from a SqlKata query.
