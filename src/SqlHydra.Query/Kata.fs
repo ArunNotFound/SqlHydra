@@ -79,11 +79,12 @@ type LoggedSqlResult(r: SqlResult) =
             sb.AppendLine($"- {kvp.Key}: {kvp.Value}") |> ignore
         sb.ToString()
 
-type InsertType = 
+type InsertType =
     | Insert
     | InsertOrReplace
     | OnConflictDoUpdate of conflictFields: string list * updateFields: string list
     | OnConflictDoNothing of conflictFields: string list
+    | InsertOrUpdateOnUnique of keyFields: string list * updateFields: string list
 
 type InsertQuerySpec<'T, 'Identity> =
     {
@@ -273,11 +274,12 @@ module internal KataUtils =
             Query(spec.Table).AsInsert(columns, rowsValues)
 
     /// Fails if `getId` identity field is used as an `onConflict` target.
-    let failIfIdentityOnConflict spec = 
+    let failIfIdentityOnConflict spec =
         match spec.IdentityField, spec.InsertType with
         | Some ident, OnConflictDoUpdate (conflictFields, _)
-        | Some ident, OnConflictDoNothing conflictFields ->
-            if conflictFields |> List.contains ident 
+        | Some ident, OnConflictDoNothing conflictFields
+        | Some ident, InsertOrUpdateOnUnique (conflictFields, _) ->
+            if conflictFields |> List.contains ident
             then failwith $"Using identity column as a conflict target is not supported."
         | _ -> ()
 

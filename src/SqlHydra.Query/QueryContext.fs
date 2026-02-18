@@ -248,9 +248,70 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
             return entities |> Seq.tryHead
         }
 
-    member this.Insert<'T, 'InsertReturn> (iq: InsertQuery<'T, 'InsertReturn>) = 
+    /// Adds a parameter to the command, handling QueryParameter type and DateOnly/TimeOnly conversion.
+    member private this.AddParameter(cmd: DbCommand, name: string, value: obj) =
+        let p = cmd.CreateParameter()
+        p.ParameterName <- name
+        p.Value <-
+            match value with
+            | :? QueryParameter as qp ->
+                do setParameterDbType p qp
+                qp.Value
+            | _ -> value
+            |> KataUtils.convertIfDateOnlyTimeOnly
+        cmd.Parameters.Add(p) |> ignore
+
+    /// Brackets a table name like "dbo.ErrorLog" to "[dbo].[ErrorLog]".
+    member private this.BracketTable(table: string) =
+        table.Split('.')
+        |> Array.map (fun part -> $"[{part}]")
+        |> fun parts -> String.Join(".", parts)
+
+    /// Applies InsertOrUpdateOnUnique wrapping to a command: wraps INSERT in TRY/CATCH with UPDATE fallback.
+    member private this.ApplyInsertOrUpdateOnUnique<'T, 'InsertReturn>(cmd: DbCommand, spec: InsertQuerySpec<'T, 'InsertReturn>, keyFields: string list, updateFields: string list) =
+        let entity = spec.Entities |> List.head
+        let properties = FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>)
+        let propMap = properties |> Array.map (fun p -> p.Name, p) |> Map.ofArray
+
+        let bracketedTable = this.BracketTable(spec.Table)
+
+        let setClause =
+            updateFields
+            |> List.map (fun col -> $"[{col}] = @__update_{col}")
+            |> fun parts -> String.Join(", ", parts)
+
+        let whereClause =
+            keyFields
+            |> List.map (fun col -> $"t.[{col}] = @__key_{col}")
+            |> fun parts -> String.Join(" AND ", parts)
+
+        cmd.CommandText <-
+            $"BEGIN TRY\n    {cmd.CommandText}\nEND TRY\nBEGIN CATCH\n    IF ERROR_NUMBER() NOT IN (2627, 2601) THROW;\n    UPDATE t SET {setClause} FROM {bracketedTable} AS t WHERE {whereClause};\nEND CATCH;"
+
+        // Add update parameters
+        for col in updateFields do
+            let prop = propMap[col]
+            this.AddParameter(cmd, $"@__update_{col}", KataUtils.getQueryParameterForEntity entity prop)
+
+        // Add key parameters
+        for col in keyFields do
+            let prop = propMap[col]
+            this.AddParameter(cmd, $"@__key_{col}", KataUtils.getQueryParameterForEntity entity prop)
+
+    member this.Insert<'T, 'InsertReturn> (iq: InsertQuery<'T, 'InsertReturn>) =
         let compiledQuery = iq.ToKataQuery() |> compiler.Compile
         use cmd = this.BuildCommand(compiledQuery, log = false) // We will log manually below to capture query changes
+
+        KataUtils.failIfIdentityOnConflict iq.Spec
+
+        // Handle InsertOrUpdateOnUnique separately (SQL Server TRY/CATCH pattern)
+        match iq.Spec.InsertType with
+        | InsertOrUpdateOnUnique (keyFields, updateFields) ->
+            this.ApplyInsertOrUpdateOnUnique(cmd, iq.Spec, keyFields, updateFields)
+            this.LogCommand(compiledQuery, cmd)
+            let results = cmd.ExecuteNonQuery()
+            Convert.ChangeType(results, typeof<'InsertReturn>) :?> 'InsertReturn
+        | _ ->
 
         // Applies on conflict modifier if in spec
         let applyOnConflict =
@@ -259,23 +320,22 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
             | OnConflictDoUpdate (conflictFields, updateFields) -> OnConflict.onConflictDoUpdate conflictFields updateFields
             | OnConflictDoNothing conflictFields -> OnConflict.onConflictDoNothing conflictFields
             | Insert -> id
-
-        KataUtils.failIfIdentityOnConflict iq.Spec
+            | InsertOrUpdateOnUnique _ -> id // handled above
 
         // Did the user select an identity field?
         match iq.Spec.IdentityField with
-        | Some identityField -> 
+        | Some identityField ->
             // Try apply on conflict
             cmd.CommandText <- cmd.CommandText |> applyOnConflict
 
             // Fix postgres identity
-            if compiler :? SqlKata.Compilers.PostgresCompiler 
-            then cmd.CommandText <- cmd.CommandText |> Fixes.Postgres.fixIdentityQuery identityField 
+            if compiler :? SqlKata.Compilers.PostgresCompiler
+            then cmd.CommandText <- cmd.CommandText |> Fixes.Postgres.fixIdentityQuery identityField
 
             // Fix oracle identity
-            elif compiler  :? SqlKata.Compilers.OracleCompiler 
-            then cmd.CommandText <- cmd.CommandText |> Fixes.Oracle.fixIdentityQuery identityField 
-                        
+            elif compiler  :? SqlKata.Compilers.OracleCompiler
+            then cmd.CommandText <- cmd.CommandText |> Fixes.Oracle.fixIdentityQuery identityField
+
             // Fix mssql guid identity
             elif compiler :? SqlKata.Compilers.SqlServerCompiler && typeof<'InsertReturn> = typeof<System.Guid>
             then cmd.CommandText <- cmd.CommandText |> Fixes.MsSql.fixGuidIdentityQuery identityField
@@ -296,15 +356,15 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
                 let identity = cmd.ExecuteScalar()
                 // 'InsertReturn type set via `getId` in the builder
                 Convert.ChangeType(identity, typeof<'InsertReturn>) :?> 'InsertReturn
-        
+
         | None ->
             // Try apply on conflict
             cmd.CommandText <- cmd.CommandText |> applyOnConflict
 
             // Fix Oracle multi-insert query
-            if compiler :? SqlKata.Compilers.OracleCompiler && iq.Spec.Entities.Length > 1 
-            then cmd.CommandText <- cmd.CommandText |> Fixes.Oracle.fixMultiInsertQuery 
-                    
+            if compiler :? SqlKata.Compilers.OracleCompiler && iq.Spec.Entities.Length > 1
+            then cmd.CommandText <- cmd.CommandText |> Fixes.Oracle.fixMultiInsertQuery
+
             this.LogCommand(compiledQuery, cmd)
 
             let results = cmd.ExecuteNonQuery()
@@ -314,11 +374,22 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
     member this.InsertAsync<'T, 'InsertReturn> (query: InsertQuery<'T, 'InsertReturn>) = 
         this.InsertAsyncWithOptions(query)
     
-    member this.InsertAsyncWithOptions<'T, 'InsertReturn> (iq: InsertQuery<'T, 'InsertReturn>, ?cancel: CancellationToken) = 
+    member this.InsertAsyncWithOptions<'T, 'InsertReturn> (iq: InsertQuery<'T, 'InsertReturn>, ?cancel: CancellationToken) =
         task { // Must wrap in task to prevent `EndExecuteNonQuery` ex in NET6_0_OR_GREATER
             let compiledQuery = iq.ToKataQuery() |> compiler.Compile
             use cmd = this.BuildCommand(compiledQuery, log = false) // We will log manually below to capture query changes
             let cancel = defaultArg cancel CancellationToken.None
+
+            KataUtils.failIfIdentityOnConflict iq.Spec
+
+            // Handle InsertOrUpdateOnUnique separately (SQL Server TRY/CATCH pattern)
+            match iq.Spec.InsertType with
+            | InsertOrUpdateOnUnique (keyFields, updateFields) ->
+                this.ApplyInsertOrUpdateOnUnique(cmd, iq.Spec, keyFields, updateFields)
+                this.LogCommand(compiledQuery, cmd)
+                let! results = cmd.ExecuteNonQueryAsync(cancel)
+                return Convert.ChangeType(results, typeof<'InsertReturn>) :?> 'InsertReturn
+            | _ ->
 
             // Applies on conflict modifier if in spec
             let applyOnConflict =
@@ -327,8 +398,7 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
                 | OnConflictDoUpdate (conflictFields, updateFields) -> OnConflict.onConflictDoUpdate conflictFields updateFields
                 | OnConflictDoNothing conflictFields -> OnConflict.onConflictDoNothing conflictFields
                 | Insert -> id
-
-            KataUtils.failIfIdentityOnConflict iq.Spec
+                | InsertOrUpdateOnUnique _ -> id // handled above
 
             // Did the user select an identity field?
             match iq.Spec with
@@ -337,17 +407,17 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
                 cmd.CommandText <- cmd.CommandText |> applyOnConflict
 
                 // Fix postgres identity
-                if compiler :? SqlKata.Compilers.PostgresCompiler 
-                then cmd.CommandText <- cmd.CommandText |> Fixes.Postgres.fixIdentityQuery identityField 
+                if compiler :? SqlKata.Compilers.PostgresCompiler
+                then cmd.CommandText <- cmd.CommandText |> Fixes.Postgres.fixIdentityQuery identityField
 
                 // Fix oracle identity
-                elif compiler :? SqlKata.Compilers.OracleCompiler 
+                elif compiler :? SqlKata.Compilers.OracleCompiler
                 then cmd.CommandText <- cmd.CommandText |> Fixes.Oracle.fixIdentityQuery identityField
 
                 // Fix mssql guid identity
                 elif compiler :? SqlKata.Compilers.SqlServerCompiler && typeof<'InsertReturn> = typeof<System.Guid>
                 then cmd.CommandText <- cmd.CommandText |> Fixes.MsSql.fixGuidIdentityQuery identityField
-                
+
                 this.LogCommand(compiledQuery, cmd)
 
                 // Execute insert and return identity
@@ -364,8 +434,8 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
                     let! identity = cmd.ExecuteScalarAsync(cancel)
                     // 'InsertReturn type set via `getId` in the builder
                     return Convert.ChangeType(identity, typeof<'InsertReturn>) :?> 'InsertReturn
-        
-            | { OutputFields = outputFields } when outputFields.Length > 0 -> 
+
+            | { OutputFields = outputFields } when outputFields.Length > 0 ->
                 // Try apply on conflict
                 cmd.CommandText <- cmd.CommandText |> applyOnConflict
 
@@ -373,9 +443,9 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
                 cmd.CommandText <- OutputClause.inserted outputFields cmd.CommandText
 
                 // Fix Oracle multi-insert query
-                if compiler :? SqlKata.Compilers.OracleCompiler && iq.Spec.Entities.Length > 1 
-                then cmd.CommandText <- cmd.CommandText |> Fixes.Oracle.fixMultiInsertQuery 
-                
+                if compiler :? SqlKata.Compilers.OracleCompiler && iq.Spec.Entities.Length > 1
+                then cmd.CommandText <- cmd.CommandText |> Fixes.Oracle.fixMultiInsertQuery
+
                 this.LogCommand(compiledQuery, cmd)
 
                 let! outputValues = OutputClause.readValues<'InsertReturn> cmd cancel outputFields
@@ -385,9 +455,9 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
                 cmd.CommandText <- cmd.CommandText |> applyOnConflict
 
                 // Fix Oracle multi-insert query
-                if compiler :? SqlKata.Compilers.OracleCompiler && iq.Spec.Entities.Length > 1 
-                then cmd.CommandText <- cmd.CommandText |> Fixes.Oracle.fixMultiInsertQuery 
-                
+                if compiler :? SqlKata.Compilers.OracleCompiler && iq.Spec.Entities.Length > 1
+                then cmd.CommandText <- cmd.CommandText |> Fixes.Oracle.fixMultiInsertQuery
+
                 this.LogCommand(compiledQuery, cmd)
 
                 let! results = cmd.ExecuteNonQueryAsync(cancel)

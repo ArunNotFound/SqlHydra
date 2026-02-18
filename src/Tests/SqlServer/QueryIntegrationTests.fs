@@ -924,6 +924,82 @@ let ``HierarchyId not supported for MS SQL Issue 110``() = task {
 }
 
 [<Test>]
+let ``insertOrUpdateOnUnique inserts when row absent``() = task {
+    use! ctx = db.OpenContextAsync()
+    ctx.BeginTransaction()
+
+    let id = System.Guid.NewGuid()
+    let row =
+        {
+            ext.GetIdGuidRepro.Id = id
+            ext.GetIdGuidRepro.EmailAddress = "insert@test.com"
+        }
+
+    let! result =
+        insertTask ctx {
+            for e in ext.GetIdGuidRepro do
+            entity row
+            insertOrUpdateOnUnique e.Id e.EmailAddress
+        }
+
+    result =! 1
+
+    let! found =
+        selectTask ctx {
+            for e in ext.GetIdGuidRepro do
+            where (e.Id = id)
+            select e.EmailAddress
+            tryHead
+        }
+
+    found.IsSome =! true
+    found.Value.TrimEnd() =! "insert@test.com"
+    ctx.RollbackTransaction()
+}
+
+[<Test>]
+let ``insertOrUpdateOnUnique updates when row present``() = task {
+    use! ctx = db.OpenContextAsync()
+    ctx.BeginTransaction()
+
+    let id = System.Guid.NewGuid()
+    let original =
+        {
+            ext.GetIdGuidRepro.Id = id
+            ext.GetIdGuidRepro.EmailAddress = "original@test.com"
+        }
+
+    // First insert
+    do! insertTask ctx {
+            for e in ext.GetIdGuidRepro do
+            entity original
+        } :> Task
+
+    // Upsert with same key but updated email
+    let updated = { original with EmailAddress = "updated@test.com" }
+    let! result =
+        insertTask ctx {
+            for e in ext.GetIdGuidRepro do
+            entity updated
+            insertOrUpdateOnUnique e.Id e.EmailAddress
+        }
+
+    result =! 1
+
+    let! found =
+        selectTask ctx {
+            for e in ext.GetIdGuidRepro do
+            where (e.Id = id)
+            select e.EmailAddress
+            tryHead
+        }
+
+    found.IsSome =! true
+    found.Value.TrimEnd() =! "updated@test.com"
+    ctx.RollbackTransaction()
+}
+
+[<Test>]
 let ``Individual column from a leftJoin table should be optional if Some``() = task {
     use! ctx = db.OpenContextAsync()
 

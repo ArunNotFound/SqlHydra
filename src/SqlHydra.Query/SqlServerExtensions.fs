@@ -63,6 +63,18 @@ type SqlFn =
 /// SQL Server specific extensions for the insert builder.
 type InsertBuilder<'Inserted, 'InsertReturn> with
 
+    /// Performs an insert-first upsert. On duplicate key (PK/UNIQUE violation), updates the specified columns.
+    [<CustomOperation("insertOrUpdateOnUnique", MaintainsVariableSpace = true)>]
+    member this.InsertOrUpdateOnUnique(state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>,
+        [<ProjectionParameter>] keyFieldsSelector,
+        [<ProjectionParameter>] updateFieldsSelector) =
+
+        let spec = state.Query
+        let keyFields = LinqExpressionVisitors.visitPropertiesSelector<'T, 'KeyProperty> keyFieldsSelector (fun tblAlias p -> p.Name)
+        let updateFields = LinqExpressionVisitors.visitPropertiesSelector<'T, 'UpdateProperties> updateFieldsSelector (fun tblAlias p -> p.Name)
+        let newSpec = { spec with InsertType = InsertOrUpdateOnUnique (keyFields, updateFields) }
+        QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(newSpec, state.TableMappings)
+
     /// Selects columns to output from the insert statement.
     [<CustomOperation("output", MaintainsVariableSpace = true)>]
     member this.Output (state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>, [<ProjectionParameter>] selectExpression) = 
