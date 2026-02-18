@@ -285,8 +285,16 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
             |> List.map (fun col -> $"t.[{col}] = @__key_{col}")
             |> fun parts -> String.Join(" AND ", parts)
 
-        cmd.CommandText <-
-            $"BEGIN TRY\n    {cmd.CommandText}\nEND TRY\nBEGIN CATCH\n    IF ERROR_NUMBER() NOT IN (2627, 2601) THROW;\n    UPDATE t SET {setClause} FROM {bracketedTable} AS t WHERE {whereClause};\nEND CATCH;"
+        cmd.CommandText <- $"""
+            BEGIN TRY
+                {cmd.CommandText}
+            END TRY
+            BEGIN CATCH
+                IF ERROR_NUMBER() NOT IN (2627, 2601) THROW;
+                UPDATE t SET {setClause} 
+                FROM {bracketedTable} AS t 
+                WHERE {whereClause};
+            END CATCH;"""
 
         // Add update parameters
         for col in updateFields do
