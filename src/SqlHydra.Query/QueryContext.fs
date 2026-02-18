@@ -285,15 +285,22 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
             |> List.map (fun col -> $"t.[{col}] = @__key_{col}")
             |> fun parts -> String.Join(" AND ", parts)
 
+        let insertSql = cmd.CommandText
+
         cmd.CommandText <- $"""
             BEGIN TRY
-                {cmd.CommandText}
+                {insertSql}
             END TRY
             BEGIN CATCH
-                IF ERROR_NUMBER() NOT IN (2627, 2601) THROW;
-                UPDATE t SET {setClause} 
-                FROM {bracketedTable} AS t 
+                DECLARE @err INT = ERROR_NUMBER();
+                IF @err NOT IN (2627, 2601) THROW;
+                UPDATE t SET {setClause}
+                FROM {bracketedTable} AS t
                 WHERE {whereClause};
+                IF @@ROWCOUNT = 0
+                BEGIN
+                    {insertSql}
+                END
             END CATCH;"""
 
         // Add update parameters
