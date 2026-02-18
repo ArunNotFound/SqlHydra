@@ -26,6 +26,20 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
             setProviderDbType param "SqlDbType" type'    
         | _ -> ()
 
+    /// Creates a DbParameter from a name and value, handling QueryParameter type and DateOnly/TimeOnly conversion.
+    let createParam (cmd: DbCommand) (name: string) (value: obj) =
+        let p = cmd.CreateParameter()
+        p.ParameterName <- name
+        p.Value <-
+            match value with
+            | :? QueryParameter as qp ->
+                do setParameterDbType p qp
+                qp.Value
+            | _ -> value
+            |> KataUtils.convertIfDateOnlyTimeOnly
+        p :> Data.IDbDataParameter
+
+
     let mutable logger = fun (r: SqlResult) -> ()
         
     interface IDisposable with
@@ -248,20 +262,6 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
             return entities |> Seq.tryHead
         }
 
-    /// Creates a DbParameter from a name and value, handling QueryParameter type and DateOnly/TimeOnly conversion.
-    member private this.CreateParam(cmd: DbCommand) =
-        fun (name: string) (value: obj) ->
-            let p = cmd.CreateParameter()
-            p.ParameterName <- name
-            p.Value <-
-                match value with
-                | :? QueryParameter as qp ->
-                    do setParameterDbType p qp
-                    qp.Value
-                | _ -> value
-                |> KataUtils.convertIfDateOnlyTimeOnly
-            p :> Data.IDbDataParameter
-
     member this.Insert<'T, 'InsertReturn> (iq: InsertQuery<'T, 'InsertReturn>) =
         let compiledQuery = iq.ToKataQuery() |> compiler.Compile
         use cmd = this.BuildCommand(compiledQuery, log = false) // We will log manually below to capture query changes
@@ -276,7 +276,7 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
             let getColumnValue col = KataUtils.getQueryParameterForEntity entity propMap[col]
             let existingParams = [ for i in 0 .. cmd.Parameters.Count - 1 -> cmd.Parameters[i] :> Data.IDbDataParameter ]
             let newSql, allParams =
-                InsertOrUpdateOnUnique.apply iq.Spec.Table keyFields updateFields cmd.CommandText existingParams (this.CreateParam cmd) getColumnValue
+                InsertOrUpdateOnUnique.apply iq.Spec.Table keyFields updateFields cmd.CommandText existingParams (createParam cmd) getColumnValue
             cmd.CommandText <- newSql
             cmd.Parameters.Clear()
             for p in allParams do cmd.Parameters.Add(p) |> ignore
@@ -362,7 +362,7 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
                 let getColumnValue col = KataUtils.getQueryParameterForEntity entity propMap[col]
                 let existingParams = [ for i in 0 .. cmd.Parameters.Count - 1 -> cmd.Parameters[i] :> Data.IDbDataParameter ]
                 let newSql, allParams =
-                    InsertOrUpdateOnUnique.apply iq.Spec.Table keyFields updateFields cmd.CommandText existingParams (this.CreateParam cmd) getColumnValue
+                    InsertOrUpdateOnUnique.apply iq.Spec.Table keyFields updateFields cmd.CommandText existingParams (createParam cmd) getColumnValue
                 cmd.CommandText <- newSql
                 cmd.Parameters.Clear()
                 for p in allParams do cmd.Parameters.Add(p) |> ignore
