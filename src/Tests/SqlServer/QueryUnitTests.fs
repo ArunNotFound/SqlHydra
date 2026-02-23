@@ -1,7 +1,9 @@
 ﻿module SqlServer.``Query Unit Tests``
 
+open System.Data
 open Swensen.Unquote
 open SqlHydra.Query
+open SqlHydra.Query.InsertOrUpdateOnUnique
 open DB
 open NUnit.Framework
 
@@ -1021,3 +1023,119 @@ let ``selectExpr - leftJoin column-only`` () =
     sql.Contains("[r].[ReasonType]") =! true
     sql.Contains("[r].[Name]") =! true
     sql.Contains("[r].*") =! false
+
+// ==========================================
+// InsertOrUpdateOnUnique Tests
+// ==========================================
+
+/// Stub IDbDataParameter for unit testing InsertOrUpdateOnUnique.apply.
+type StubParam(name: string, value: obj) =
+    interface IDbDataParameter with
+        member _.DbType with get() = DbType.String and set _ = ()
+        member _.Direction with get() = ParameterDirection.Input and set _ = ()
+        member _.IsNullable = false
+        member _.ParameterName with get() = name and set _ = ()
+        member _.SourceColumn with get() = "" and set _ = ()
+        member _.SourceVersion with get() = DataRowVersion.Current and set _ = ()
+        member _.Value with get() = value and set _ = ()
+        member _.Precision with get() = 0uy and set _ = ()
+        member _.Scale with get() = 0uy and set _ = ()
+        member _.Size with get() = 0 and set _ = ()
+
+[<Test>]
+let ``InsertOrUpdateOnUnique apply generates TRY CATCH SQL``() =
+    let insertSql = "INSERT INTO [dbo].[ErrorLog] ([ErrorTime], [UserName], [ErrorNumber]) VALUES (@p0, @p1, @p2)"
+    let existingParams: IDbDataParameter list =
+        [
+            StubParam("@p0", box "2024-01-01")
+            StubParam("@p1", box "admin")
+            StubParam("@p2", box 50000)
+        ]
+    let createParam (name: string) (value: obj) : IDbDataParameter =
+        StubParam(name, value) :> IDbDataParameter
+    let columnValues = dict [ "ErrorTime", box "2024-01-01"; "UserName", box "admin"; "ErrorNumber", box 50000 ]
+    let getColumnValue (col: string) = columnValues.[col]
+
+    let sql, allParams =
+        InsertOrUpdateOnUnique.apply
+            "dbo.ErrorLog"
+            [ "ErrorNumber" ]
+            [ "ErrorTime"; "UserName" ]
+            insertSql
+            existingParams
+            createParam
+            getColumnValue
+
+    let expected = """
+BEGIN TRY
+    INSERT INTO [dbo].[ErrorLog] ([ErrorTime], [UserName], [ErrorNumber]) VALUES (@p0, @p1, @p2)
+END TRY
+BEGIN CATCH
+    DECLARE @err INT = ERROR_NUMBER();
+    IF @err NOT IN (2627, 2601) THROW;
+
+    UPDATE t SET [ErrorTime] = @__update_ErrorTime, [UserName] = @__update_UserName
+    FROM [dbo].[ErrorLog] AS t
+    WHERE t.[ErrorNumber] = @__key_ErrorNumber;
+
+    IF @@ROWCOUNT = 0
+    BEGIN
+        INSERT INTO [dbo].[ErrorLog] ([ErrorTime], [UserName], [ErrorNumber]) VALUES (@p0, @p1, @p2)
+    END
+END CATCH;"""
+
+    sql =! expected
+
+    // Verify parameter count: 3 existing + 2 update + 1 key = 6
+    allParams.Length =! 6
+    let paramNames = allParams |> List.map (fun p -> p.ParameterName)
+    paramNames =! [ "@p0"; "@p1"; "@p2"; "@__update_ErrorTime"; "@__update_UserName"; "@__key_ErrorNumber" ]
+
+[<Test>]
+let ``InsertOrUpdateOnUnique apply with multiple key columns``() =
+    let insertSql = "INSERT INTO [Sales].[Customer] ([CustomerID], [StoreID], [AccountNumber]) VALUES (@p0, @p1, @p2)"
+    let existingParams: IDbDataParameter list =
+        [
+            StubParam("@p0", box 1)
+            StubParam("@p1", box 100)
+            StubParam("@p2", box "AW00000001")
+        ]
+    let createParam (name: string) (value: obj) : IDbDataParameter =
+        StubParam(name, value) :> IDbDataParameter
+    let columnValues = dict [ "CustomerID", box 1; "StoreID", box 100; "AccountNumber", box "AW00000001" ]
+    let getColumnValue (col: string) = columnValues.[col]
+
+    let sql, allParams =
+        InsertOrUpdateOnUnique.apply
+            "Sales.Customer"
+            [ "CustomerID"; "StoreID" ]
+            [ "AccountNumber" ]
+            insertSql
+            existingParams
+            createParam
+            getColumnValue
+
+    let expected = """
+BEGIN TRY
+    INSERT INTO [Sales].[Customer] ([CustomerID], [StoreID], [AccountNumber]) VALUES (@p0, @p1, @p2)
+END TRY
+BEGIN CATCH
+    DECLARE @err INT = ERROR_NUMBER();
+    IF @err NOT IN (2627, 2601) THROW;
+
+    UPDATE t SET [AccountNumber] = @__update_AccountNumber
+    FROM [Sales].[Customer] AS t
+    WHERE t.[CustomerID] = @__key_CustomerID AND t.[StoreID] = @__key_StoreID;
+
+    IF @@ROWCOUNT = 0
+    BEGIN
+        INSERT INTO [Sales].[Customer] ([CustomerID], [StoreID], [AccountNumber]) VALUES (@p0, @p1, @p2)
+    END
+END CATCH;"""
+
+    sql =! expected
+
+    // Verify parameter count: 3 existing + 1 update + 2 keys = 6
+    allParams.Length =! 6
+    let paramNames = allParams |> List.map (fun p -> p.ParameterName)
+    paramNames =! [ "@p0"; "@p1"; "@p2"; "@__update_AccountNumber"; "@__key_CustomerID"; "@__key_StoreID" ]
