@@ -558,7 +558,9 @@ let saveUser (user: Domain.User) =
             UpdatedDate = utcNow
         }
         insertOrUpdateOnUnique
-            u.Id // If key is matched, update columns in the tuple below:
+            // Match on unique key (supports tuple for composite keys):
+            u.Id
+            // If unique key is matched, update columns in the tuple below:
             (
                 u.Username, 
                 u.Email, 
