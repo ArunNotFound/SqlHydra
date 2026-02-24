@@ -14,7 +14,7 @@ Type-safe SQL generation for F#. Generate types from your database, query with s
 **1. Install the CLI tool locally:**
 ```bash
 dotnet new tool-manifest
-dotnet tool install SqlHydra.Cli
+dotnet tool install --local SqlHydra.Cli
 ```
 
 **2. Generate types from your database:**
@@ -471,7 +471,7 @@ selectTask db {
 </details>
 
 <details>
-<summary><h2>Insert, Update, Delete</h2></summary>
+<summary><h2>Insert, Update, Upsert, Delete</h2></summary>
 
 ### Insert
 
@@ -502,18 +502,6 @@ match items |> AtLeastOne.tryCreate with
     printfn "Nothing to insert"
 ```
 
-### Upsert (Postgres/SQLite only)
-
-```fsharp
-open SqlHydra.Query.NpgsqlExtensions  // or SqliteExtensions
-
-insertTask db {
-    for a in Person.Address do
-    entity address
-    onConflictDoUpdate a.AddressID (a.City, a.PostalCode, a.ModifiedDate)
-}
-```
-
 ### Update
 
 ```fsharp
@@ -539,6 +527,72 @@ updateTask db {
     set c.AccountNumber "123"
     updateAll
 }
+```
+
+### Upsert - SQL Server (`insertOrUpdateOnUnique`)
+
+SqlHydra.Query v3.5+ supports **insert-or-update (upsert)** for SQL Server via the new `insertOrUpdateOnUnique` custom operation. This allows you to atomically insert a row or update it if a row with the same unique key already exists.
+
+The goal was to provide a built-in upsert capability for SQL Server that is analogous to the `onConflictDoUpdate` style upsert extensions already available for SQLite and PostgreSQL queries. A key design decision was to avoid using SQL Server's `MERGE` statement in order to sidestep its [well-known footguns ](https://www.mssqltips.com/sqlservertip/3074/use-caution-with-sql-servers-merge-statement/).
+
+#### How It Works
+
+The generated SQL uses a `TRY/CATCH` pattern that:
+1. Attempts the `INSERT`
+2. If it fails with a duplicate key violation (error 2627 or 2601), falls back to an `UPDATE`
+3. If the `UPDATE` affects 0 rows (due to a concurrent delete), retries the `INSERT`
+
+```fsharp
+open SqlHydra.Query.SqlServerExtensions
+
+let saveUser (user: Domain.User) =
+    let utcNow = System.DateTime.UtcNow
+    
+    insertTask db {
+        for u in dbo.Users do
+        entity {
+            Id = user.Id
+            Username = user.Username
+            Email = user.Email
+            CreatedDate = utcNow
+            UpdatedDate = utcNow
+        }
+        insertOrUpdateOnUnique
+            u.Id // If key is matched, update columns in the tuple below:
+            (
+                u.Username, 
+                u.Email, 
+                u.UpdatedDate
+            )
+    }
+```
+
+### Upsert - PostgreSQL and SQLite (`onConflictDoUpdate`)
+
+```fsharp
+open SqlHydra.Query.NpgsqlExtensions
+// open SqlHydra.Query.SqliteExtensions
+
+let saveUser (user: Domain.User) =
+    let utcNow = System.DateTime.UtcNow
+    
+    insertTask db {
+        for u in dbo.Users do
+        entity {
+            Id = user.Id
+            Username = user.Username
+            Email = user.Email
+            CreatedDate = utcNow
+            UpdatedDate = utcNow
+        }
+        onConflictDoUpdate
+            u.Id // If key is matched, update columns in the tuple below:
+            (
+                u.Username, 
+                u.Email, 
+                u.UpdatedDate
+            )
+    }
 ```
 
 ### Delete
