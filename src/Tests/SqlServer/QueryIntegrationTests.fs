@@ -1000,6 +1000,49 @@ let ``insertOrUpdateOnUnique updates when row present``() = task {
 }
 
 [<Test>]
+let ``insertOrUpdateOnUnique updates when nullable key column is NULL``() = task {
+    use! ctx = db.OpenContextAsync()
+    ctx.BeginTransaction()
+
+    let key1 = System.Guid.NewGuid()
+    let original =
+        {
+            ext.NullableKeyUpsert.Key1 = key1
+            ext.NullableKeyUpsert.Key2 = None
+            ext.NullableKeyUpsert.Value = "original"
+        }
+
+    // First insert
+    do! insertTask ctx {
+            for e in ext.NullableKeyUpsert do
+            entity original
+        } :> Task
+
+    // Upsert with same composite key (Key1 = guid, Key2 = NULL) but updated Value
+    let updated = { original with Value = "updated" }
+    let! result =
+        insertTask ctx {
+            for e in ext.NullableKeyUpsert do
+            entity updated
+            insertOrUpdateOnUnique (e.Key1, e.Key2) e.Value
+        }
+
+    result =! 1
+
+    let! found =
+        selectTask ctx {
+            for e in ext.NullableKeyUpsert do
+            where (e.Key1 = key1)
+            select e.Value
+            tryHead
+        }
+
+    found.IsSome =! true
+    found.Value =! "updated"
+    ctx.RollbackTransaction()
+}
+
+[<Test>]
 let ``Individual column from a leftJoin table should be optional if Some``() = task {
     use! ctx = db.OpenContextAsync()
 

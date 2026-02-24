@@ -28,10 +28,19 @@ let apply
         |> List.map (fun col -> $"[{col}] = @__update_{col}")
         |> fun parts -> String.Join(", ", parts)
 
-    let whereClause =
+    let whereConditions =
         keyColumns
-        |> List.map (fun col -> $"t.[{col}] = @__key_{col}")
-        |> fun parts -> String.Join(" AND ", parts)
+        |> List.map (fun col ->
+            $"(t.[{col}] = @__key_{col} OR (t.[{col}] IS NULL AND @__key_{col} IS NULL))")
+
+    let whereClause =
+        let indented =
+            whereConditions
+            |> List.mapi (fun i cond ->
+                if i < whereConditions.Length - 1 then $"        {cond} AND"
+                else $"        {cond}")
+        let lines = String.Join("\n", indented)
+        $"WHERE (\n{lines}\n    )"
 
     let finalSql =
         $"""
@@ -44,7 +53,7 @@ BEGIN CATCH
 
     UPDATE t SET {updateSetClause}
     FROM {bracketedTable} AS t
-    WHERE {whereClause};
+    {whereClause};
 
     IF @@ROWCOUNT = 0
     BEGIN

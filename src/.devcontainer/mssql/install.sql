@@ -31,6 +31,16 @@ CREATE TABLE [ext].[GetIdGuidRepro]
 )
 GO
 
+-- Upsert with nullable composite key for insertOrUpdateOnUnique NULL-safe fix
+CREATE TABLE [ext].[NullableKeyUpsert]
+(
+    [Key1] UNIQUEIDENTIFIER NOT NULL,
+    [Key2] NVARCHAR(50) NULL,
+    [Value] NVARCHAR(200) NOT NULL,
+    CONSTRAINT [UQ_NullableKeyUpsert] UNIQUE ([Key1], [Key2])
+)
+GO
+
 -- https://github.com/JordanMarr/SqlHydra/issues/106
 CREATE TABLE [ext].[HierarchyIdSupport]
 (

@@ -1076,7 +1076,9 @@ BEGIN CATCH
 
     UPDATE t SET [ErrorTime] = @__update_ErrorTime, [UserName] = @__update_UserName
     FROM [dbo].[ErrorLog] AS t
-    WHERE t.[ErrorNumber] = @__key_ErrorNumber;
+    WHERE (
+        (t.[ErrorNumber] = @__key_ErrorNumber OR (t.[ErrorNumber] IS NULL AND @__key_ErrorNumber IS NULL))
+    );
 
     IF @@ROWCOUNT = 0
     BEGIN
@@ -1125,7 +1127,10 @@ BEGIN CATCH
 
     UPDATE t SET [AccountNumber] = @__update_AccountNumber
     FROM [Sales].[Customer] AS t
-    WHERE t.[CustomerID] = @__key_CustomerID AND t.[StoreID] = @__key_StoreID;
+    WHERE (
+        (t.[CustomerID] = @__key_CustomerID OR (t.[CustomerID] IS NULL AND @__key_CustomerID IS NULL)) AND
+        (t.[StoreID] = @__key_StoreID OR (t.[StoreID] IS NULL AND @__key_StoreID IS NULL))
+    );
 
     IF @@ROWCOUNT = 0
     BEGIN
