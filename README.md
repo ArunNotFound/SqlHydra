@@ -471,7 +471,7 @@ selectTask db {
 </details>
 
 <details>
-<summary><h2>Insert, Update, Delete</h2></summary>
+<summary><h2>Insert, Update, Upsert, Delete</h2></summary>
 
 ### Insert
 
