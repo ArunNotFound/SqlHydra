@@ -65,7 +65,7 @@ SqlHydra.Cli reads your database schema and adds a generated file to your projec
 
 - **F# record types** for each table (with `Option` types for nullable columns)
 - **Table declarations** for use in queries
-- **QueryContextFactory** with a static `Create(connectionString: string)` method.
+- **`QueryContextFactory`** with a static `Create(connectionString: string)` method.
 
 ```fsharp
 // Generated from your database schema:
