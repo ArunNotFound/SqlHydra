@@ -61,11 +61,11 @@ That's it! Your queries are now type-checked at compile time.
 
 ## What Gets Generated?
 
-SqlHydra.Cli reads your database schema and generates:
+SqlHydra.Cli reads your database schema and adds a generated file to your project that contains:
 
-- **F# record types** for each table (with Option types for nullable columns)
+- **F# record types** for each table (with `Option` types for nullable columns)
 - **Table declarations** for use in queries
-- **HydraReader** for efficiently reading query results
+- **QueryContextFactory** with a static `Create(connectionString: string)` method.
 
 ```fsharp
 // Generated from your database schema:
