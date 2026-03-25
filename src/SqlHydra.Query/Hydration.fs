@@ -281,7 +281,7 @@ let buildRowReader<'T> (provider: ProviderType) (reader: DbDataReader) : (unit -
             readFn() :?> 'T
 
 /// Builds a function for selectExpr queries using leaf metadata.
-let internal buildSelectExprReader (provider: ProviderType) (reader: DbDataReader) (exprInfo: LinqExpressionVisitors.SelectExprInfo) : (unit -> obj[]) =
+let internal buildSelectExprReader (provider: ProviderType) (reader: DbDataReader) (exprInfo: SelectExprVisitors.SelectExprInfo) : (unit -> obj[]) =
     let tracker = OrdinalTracker(reader)
     let leafTupleType = exprInfo.LeafTupleType
     ColumnReadMethods.SetProvider(provider)

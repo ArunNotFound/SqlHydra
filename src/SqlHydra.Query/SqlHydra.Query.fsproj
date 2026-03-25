@@ -35,6 +35,7 @@
 		<Compile Include="QuotationVisitor.fs" />
 		<Compile Include="ExpressionNormalizer.fs" />
 		<Compile Include="LinqExpressionVisitors.fs" />
+		<Compile Include="SelectExprVisitors.fs" />
 		<Compile Include="Fixes.fs" />
 		<Compile Include="OnConflict.fs" />
 		<Compile Include="InsertOrUpdateOnUnique.fs" />

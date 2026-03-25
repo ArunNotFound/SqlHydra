@@ -181,13 +181,13 @@ type SelectBuilder<'Selected, 'Mapped> () =
     /// Supports string interpolation, conditionals, and other F# expressions that reference DB columns.
     //[<CustomOperation("select", MaintainsVariableSpace = true, AllowIntoPattern = true)>]
     //member this.SelectExpr (state: QuerySource<'T, Query>, [<ProjectionParameter>] selectExpression: Expression<Func<'T, 'Selected>>) =
-    //    let exprInfo = LinqExpressionVisitors.visitSelectExpr<'T, 'Selected> selectExpression
+    //    let exprInfo = SelectExprVisitors.visitSelectExpr<'T, 'Selected> selectExpression
 
     //    // Collect aliases that have a TableLeaf (full record); suppress individual ColumnLeafs for those aliases
     //    let tableLeafAliases =
     //        exprInfo.Leaves
     //        |> List.choose (function
-    //            | LinqExpressionVisitors.TableLeaf (tableAlias, _, _) -> Some tableAlias
+    //            | SelectExprVisitors.TableLeaf (tableAlias, _, _) -> Some tableAlias
     //            | _ -> None)
     //        |> Set.ofList
 
@@ -195,13 +195,13 @@ type SelectBuilder<'Selected, 'Mapped> () =
     //        exprInfo.Leaves
     //        |> List.fold (fun (q: Query) leaf ->
     //            match leaf with
-    //            | LinqExpressionVisitors.TableLeaf (tableAlias, _, _) -> q.Select($"%s{tableAlias}.*")
-    //            | LinqExpressionVisitors.ColumnLeaf (tableAlias, _, _, _, _, _) when tableLeafAliases.Contains(tableAlias) -> q // Suppressed by TableLeaf
-    //            | LinqExpressionVisitors.ColumnLeaf (tableAlias, column, _, _, _, _) -> q.Select($"%s{tableAlias}.%s{column}")
-    //            | LinqExpressionVisitors.SqlExprLeaf (sqlFragment, _, alias, _) -> q.SelectRaw($"{sqlFragment} AS {alias}")
+    //            | SelectExprVisitors.TableLeaf (tableAlias, _, _) -> q.Select($"%s{tableAlias}.*")
+    //            | SelectExprVisitors.ColumnLeaf (tableAlias, _, _, _, _, _) when tableLeafAliases.Contains(tableAlias) -> q // Suppressed by TableLeaf
+    //            | SelectExprVisitors.ColumnLeaf (tableAlias, column, _, _, _, _) -> q.Select($"%s{tableAlias}.%s{column}")
+    //            | SelectExprVisitors.SqlExprLeaf (sqlFragment, _, alias, _) -> q.SelectRaw($"{sqlFragment} AS {alias}")
     //        ) state.Query
 
-    //    LinqExpressionVisitors.SelectExprStore.set queryWithSelectedColumns exprInfo
+    //    SelectExprVisitors.SelectExprStore.set queryWithSelectedColumns exprInfo
     //    QuerySource<'Selected, Query>(queryWithSelectedColumns, state.TableMappings)
 
     /// Sets the ORDER BY for single column
@@ -604,7 +604,7 @@ type SelectTaskBuilder<'Selected, 'Mapped> (ct: ContextType) =
                 ContextUtils.disposeIfNotShared ct ctx
         }
 
-    member private this.RunSelectExpr(query: Query, exprInfo: LinqExpressionVisitors.SelectExprInfo, resultModifier) =
+    member private this.RunSelectExpr(query: Query, exprInfo: SelectExprVisitors.SelectExprInfo, resultModifier) =
         task {
             let! ctx = ContextUtils.getContext ct
             try
@@ -627,7 +627,7 @@ type SelectTaskBuilder<'Selected, 'Mapped> (ct: ContextType) =
                 ContextUtils.disposeIfNotShared ct ctx
         }
 
-    member private this.RunSelectExprMapped(query: Query, exprInfo: LinqExpressionVisitors.SelectExprInfo, resultModifier) =
+    member private this.RunSelectExprMapped(query: Query, exprInfo: SelectExprVisitors.SelectExprInfo, resultModifier) =
         task {
             let! ctx = ContextUtils.getContext ct
             try
@@ -654,61 +654,61 @@ type SelectTaskBuilder<'Selected, 'Mapped> (ct: ContextType) =
     /// Called when no mapSeq, mapArray or mapList is present;
     /// this input will always be 'Selected -- even if select is not present.
     member this.Run(state: QuerySource<'Selected, Query>) =
-        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
         | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, id)
         | None -> this.RunSelected(state.Query, id)
     
     /// Run: toList
     member this.Run(state: QuerySource<'Selected list, Query>) =
-        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
         | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.toList)
         | None -> this.RunSelected(state.Query, Seq.toList)
 
     /// Run: toArray
     member this.Run(state: QuerySource<'Selected array, Query>) =
-        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
         | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.toArray)
         | None -> this.RunSelected(state.Query, Seq.toArray)
 
     /// Run: mapList
     member this.Run(state: QuerySource<'Mapped list, Query>) =
-        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
         | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.toList)
         | None -> this.RunMapped(state.Query, Seq.toList)
 
     // Run: mapArray
     member this.Run(state: QuerySource<'Mapped array, Query>) =
-        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
         | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.toArray)
         | None -> this.RunMapped(state.Query, Seq.toArray)
 
     // Run: mapSeq
     member this.Run(state: QuerySource<'Mapped seq, Query>) =
-        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
         | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, id)
         | None -> this.RunMapped(state.Query, id)
 
     // Run: tryHead - 'Selected
     member this.Run(state: QuerySource<'Selected option, Query>) =
-        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
         | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.tryHead)
         | None -> this.RunSelected(state.Query, Seq.tryHead)
 
     // Run: tryHead - 'Mapped
     member this.Run(state: QuerySource<'Mapped option, Query>) =
-        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
         | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.tryHead)
         | None -> this.RunMapped(state.Query, Seq.tryHead)
 
     // Run: head - 'Selected
     member this.Run(state: QuerySource<ResultModifier.Head<'Selected>, Query>) =
-        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
         | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.head)
         | None -> this.RunSelected(state.Query, Seq.head)
 
     // Run: head - 'Mapped
     member this.Run(state: QuerySource<ResultModifier.Head<'Mapped>, Query>) =
-        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
         | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.head)
         | None -> this.RunMapped(state.Query, Seq.head)
 
@@ -771,7 +771,7 @@ type SelectAsyncBuilder<'Selected, 'Mapped> (ct: ContextType) =
                 ContextUtils.disposeIfNotShared ct ctx
         }
 
-    member private this.RunSelectExpr(query: Query, exprInfo: LinqExpressionVisitors.SelectExprInfo, resultModifier) =
+    member private this.RunSelectExpr(query: Query, exprInfo: SelectExprVisitors.SelectExprInfo, resultModifier) =
         async {
             let! ctx = ContextUtils.getContext ct |> Async.AwaitTask
             try
@@ -796,7 +796,7 @@ type SelectAsyncBuilder<'Selected, 'Mapped> (ct: ContextType) =
                 ContextUtils.disposeIfNotShared ct ctx
         }
 
-    member private this.RunSelectExprMapped(query: Query, exprInfo: LinqExpressionVisitors.SelectExprInfo, resultModifier) =
+    member private this.RunSelectExprMapped(query: Query, exprInfo: SelectExprVisitors.SelectExprInfo, resultModifier) =
         async {
             let! ctx = ContextUtils.getContext ct |> Async.AwaitTask
             try
@@ -825,61 +825,61 @@ type SelectAsyncBuilder<'Selected, 'Mapped> (ct: ContextType) =
     /// Called when no mapSeq, mapArray or mapList is present;
     /// this input will always be 'Selected -- even if select is not present.
     member this.Run(state: QuerySource<'Selected, Query>) =
-        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
         | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, id)
         | None -> this.RunSelected(state.Query, id)
 
     /// Run: toList
     member this.Run(state: QuerySource<'Selected list, Query>) =
-        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
         | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.toList)
         | None -> this.RunSelected(state.Query, Seq.toList)
 
     /// Run: toArray
     member this.Run(state: QuerySource<'Selected array, Query>) =
-        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
         | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.toArray)
         | None -> this.RunSelected(state.Query, Seq.toArray)
 
     /// Run: mapList
     member this.Run(state: QuerySource<'Mapped list, Query>) =
-        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
         | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.toList)
         | None -> this.RunMapped(state.Query, Seq.toList)
 
     // Run: mapArray
     member this.Run(state: QuerySource<'Mapped array, Query>) =
-        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
         | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.toArray)
         | None -> this.RunMapped(state.Query, Seq.toArray)
 
     // Run: mapSeq
     member this.Run(state: QuerySource<'Mapped seq, Query>) =
-        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
         | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, id)
         | None -> this.RunMapped(state.Query, id)
 
     // Run: tryHead - 'Selected
     member this.Run(state: QuerySource<'Selected option, Query>) =
-        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
         | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.tryHead)
         | None -> this.RunSelected(state.Query, Seq.tryHead)
 
     // Run: tryHead - 'Mapped
     member this.Run(state: QuerySource<'Mapped option, Query>) =
-        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
         | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.tryHead)
         | None -> this.RunMapped(state.Query, Seq.tryHead)
 
     // Run: head - 'Selected
     member this.Run(state: QuerySource<ResultModifier.Head<'Selected>, Query>) =
-        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
         | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.head)
         | None -> this.RunSelected(state.Query, Seq.head)
 
     // Run: head - 'Mapped
     member this.Run(state: QuerySource<ResultModifier.Head<'Mapped>, Query>) =
-        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
         | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.head)
         | None -> this.RunMapped(state.Query, Seq.head)
 
