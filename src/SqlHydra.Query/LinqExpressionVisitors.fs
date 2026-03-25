@@ -9,6 +9,35 @@ open FastExpressionCompiler
 let notImpl() = raise (NotImplementedException())
 let notImplMsg msg = raise (NotImplementedException msg)
 
+/// Inlines block variable assignments, replacing variable references with their assigned values.
+/// Newer FSharp.Core versions (10.1+) wrap lambda bodies in BlockExpressions that introduce
+/// local variables. This visitor substitutes those variables so downstream pattern matching
+/// sees the original expression tree shapes.
+type private BlockInliner(substitutions: System.Collections.Generic.Dictionary<ParameterExpression, Expression>) =
+    inherit ExpressionVisitor()
+    override _.VisitParameter(node) =
+        match substitutions.TryGetValue(node) with
+        | true, value -> base.Visit(value)
+        | _ -> node :> Expression
+
+/// Unwraps a BlockExpression by selectively inlining variable assignments into the result (last) expression.
+/// Only inlines variables whose assignments are NOT member accesses (tuple deconstructions like
+/// `o = tupledArg.Item1` must be preserved so that visitAlias extracts the correct table alias).
+let inlineBlock (blk: BlockExpression) =
+    let substitutions = System.Collections.Generic.Dictionary<ParameterExpression, Expression>()
+    for expr in blk.Expressions do
+        if expr.NodeType = ExpressionType.Assign then
+            let bin = expr :?> BinaryExpression
+            match bin.Left with
+            | :? ParameterExpression as p when bin.Right.NodeType <> ExpressionType.MemberAccess ->
+                substitutions.[p] <- bin.Right
+            | _ -> ()
+    let result = blk.Expressions |> Seq.last
+    if substitutions.Count > 0 then
+        BlockInliner(substitutions).Visit(result)
+    else
+        result
+
 [<AutoOpen>]
 module VisitorPatterns =
 
@@ -366,10 +395,7 @@ let visitWhere<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool>
     let rec visit (exp: Expression) (query: Query) : Query =
         match exp with
         | Lambda x -> visit x.Body query
-        | :? BlockExpression as blk ->
-            // Newer FSharp.Core versions may wrap lambda bodies in BlockExpressions.
-            // The last expression in the block is the result.
-            visit (blk.Expressions |> Seq.last) query
+        | :? BlockExpression as blk -> visit (blk.Expressions |> Seq.last) query
         | MethodCall m when m.Method.Name = "Invoke" ->
             // Handle tuples
             visit m.Object (Query())
@@ -772,8 +798,7 @@ let visitHaving<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool
     let rec visit (exp: Expression) (query: Query) : Query =
         match exp with
         | Lambda x -> visit x.Body query
-        | :? BlockExpression as blk ->
-            visit (blk.Expressions |> Seq.last) query
+        | :? BlockExpression as blk -> visit (blk.Expressions |> Seq.last) query
         | Not operand ->
             let operand = visit operand (Query())
             query.HavingNot(fun q -> operand)
@@ -966,10 +991,10 @@ let visitPropertiesSelector<'T, 'Prop> (propertySelector: Expression<Func<'T, 'P
         | MethodCall m when m.Method.Name = "Invoke" ->
             // Handle tuples
             visit m.Object
-        | New n -> 
+        | New n ->
             // Handle groupBy that returns a tuple of multiple columns
             n.Arguments |> Seq.map visit |> Seq.toList |> List.concat
-        | Member m -> 
+        | Member m ->
             // Handle groupBy for a single column
             let alias = visitAlias m.Expression
             let column = qualifyColumn alias m.Member
@@ -1194,18 +1219,42 @@ let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
     let rec visit (exp: Expression) : Selection list =
         match exp with
         | Lambda x -> visit x.Body
-        | :? BlockExpression as blk -> visit (blk.Expressions |> Seq.last)
+        | :? BlockExpression as blk -> visit (inlineBlock blk)
         | MethodCall m when m.Method.Name = "Invoke" ->
             // Handle tuples
             visit m.Object
         | MethodCall m when m.Method.Name = "Some" ->
             // Columns selected from leftJoined tables may be wrapped in `Some` to make them optional.
             visit m.Arguments.[0]
+        // Handle direct OptionModule.Map calls (newer FSharp.Core may emit these instead of op_PipeRight)
+        | MethodCall m when m.Method.Name = "Map"
+            && m.Method.DeclaringType <> null
+            && m.Method.DeclaringType.Name = "OptionModule"
+            && m.Arguments.Count = 2 ->
+            let source = m.Arguments.[1]
+            let mappingArg = m.Arguments.[0]
+            let rec extractMember (exp: Expression) =
+                match exp with
+                | :? LambdaExpression as lam -> extractMember lam.Body
+                | :? UnaryExpression as u when u.NodeType = ExpressionType.Convert -> extractMember u.Operand
+                | Member m -> Some m
+                | _ -> None
+            match extractMember mappingArg with
+            | Some memberExp ->
+                let alias = visitAlias source
+                [ SelectedColumn (alias, memberExp.Member.Name, memberExp.Type, true, false) ]
+            | None -> notImplMsg $"Unsupported Option.map mapping expression: {mappingArg.NodeType}"
         | MethodCall m when m.Method.Name = "op_PipeRight" && m.Arguments.Count = 2 ->
             // Handle: r |> Option.map _.ColumnA
             // The F# compiler generates: op_PipeRight(source, Lambda(...ToFSharpFunc(Lambda(Option.Map(...)))).Invoke(ToFSharpFunc(Lambda(mapping))))
             // We extract the source from Arg0 and the mapping lambda from the Invoke argument.
             let source = m.Arguments.[0]
+            // Unwrap nested BlockExpressions (newer FSharp.Core may wrap sub-expressions in blocks)
+            let rec unwrapBlocks (exp: Expression) =
+                match exp with
+                | :? BlockExpression as blk -> unwrapBlocks (inlineBlock blk)
+                | _ -> exp
+            let pipeArg = unwrapBlocks m.Arguments.[1]
             let rec findOptionMapLambda (exp: Expression) =
                 match exp with
                 | :? MethodCallExpression as invoke when invoke.Method.Name = "Invoke" ->
@@ -1216,6 +1265,27 @@ let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
                         | :? LambdaExpression as mapLam -> Some mapLam
                         | _ -> None
                     | _ -> None
+                // Newer FSharp.Core: OptionModule.Map(mapping, source) — extract the mapping lambda
+                | :? MethodCallExpression as mc when
+                    mc.Method.Name = "Map"
+                    && mc.Method.DeclaringType <> null
+                    && mc.Method.DeclaringType.Name = "OptionModule"
+                    && mc.Arguments.Count = 2 ->
+                    match mc.Arguments.[0] with
+                    | :? LambdaExpression as mapLam -> Some mapLam
+                    // mapping may be wrapped in ToFSharpFunc
+                    | :? MethodCallExpression as toFF when toFF.Method.Name = "ToFSharpFunc" ->
+                        match toFF.Arguments.[0] with
+                        | :? LambdaExpression as mapLam -> Some mapLam
+                        | _ -> None
+                    | _ -> None
+                // Unwrap ToFSharpFunc(Lambda(...)) wrapping (newer FSharp.Core block inlining)
+                | :? MethodCallExpression as mc when mc.Method.Name = "ToFSharpFunc" && mc.Arguments.Count = 1 ->
+                    match mc.Arguments.[0] with
+                    | :? LambdaExpression as lam -> findOptionMapLambda lam.Body
+                    | _ -> None
+                | :? LambdaExpression as lam -> findOptionMapLambda lam.Body
+                | :? BlockExpression as blk -> findOptionMapLambda (inlineBlock blk)
                 | _ -> None
             // Verify this is actually wrapping OptionModule.Map by checking the lambda body chain
             let rec containsOptionMap (exp: Expression) =
@@ -1225,9 +1295,10 @@ let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
                     || mc.Arguments |> Seq.exists containsOptionMap
                     || (mc.Object <> null && containsOptionMap mc.Object)
                 | :? LambdaExpression as lam -> containsOptionMap lam.Body
+                | :? BlockExpression as blk -> containsOptionMap (inlineBlock blk)
                 | _ -> false
-            if containsOptionMap m.Arguments.[1] then
-                match findOptionMapLambda m.Arguments.[1] with
+            if containsOptionMap pipeArg then
+                match findOptionMapLambda pipeArg with
                 | Some mapLam ->
                     match mapLam.Body with
                     | Member memberExp ->
