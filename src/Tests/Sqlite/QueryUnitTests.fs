@@ -460,6 +460,9 @@ let ``Implicit Casts Option``() =
     // should not throw exception
     ()
 
+/// FSharp.Core 10.1+ wraps LINQ expression lambda bodies in BlockExpressions.
+/// This test verifies that the visitor correctly unwraps the block to handle
+/// join queries with multiple where conditions. (GitHub Issue #124)
 [<Test>]
 let ``Where Join with DateTime Comparisons - GitHub Issue 124``() =
     let lBound = System.DateTime(2024, 6, 20, 8, 0, 0)
