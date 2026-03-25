@@ -335,10 +335,20 @@ module NormalizedPatterns =
         | _ -> None
 
     /// Property with extended info (Option/Nullable awareness).
-    /// Delegates to the existing Property active pattern on the original MemberExpression.
+    /// Delegates to the existing Property active pattern on the original Expression.
     let (|NProperty|_|) (nexp: NormalizedExpression) =
         match nexp with
         | NMemberAccess(_, m) ->
+            match (m :> Expression) with
+            | Property (p, ext) -> Some (p, ext)
+            | _ -> None
+        | NMethodCall(call, _) ->
+            // Handle Option.Some/Nullable wrapping (e.g., Some c.ProductCategoryID)
+            match (call :> Expression) with
+            | Property (p, ext) -> Some (p, ext)
+            | _ -> None
+        | NUnary(ExpressionType.Convert, NMemberAccess(_, m)) ->
+            // Handle implicit conversions wrapping a property
             match (m :> Expression) with
             | Property (p, ext) -> Some (p, ext)
             | _ -> None
@@ -400,26 +410,6 @@ let getComparison (expType: ExpressionType) =
     | ExpressionType.LessThanOrEqual -> "<="
     | _ -> notImplMsg "Unsupported comparison type"
 
-/// Maps comparison operator method names (e.g., op_Equality) to SQL comparison strings.
-/// Newer FSharp.Core versions may emit comparisons as MethodCall expressions instead of BinaryExpression nodes.
-let (|ComparisonOperatorMethod|_|) (m: MethodCallExpression) =
-    match m.Method.Name with
-    | "op_Equality" | "GenericEqualityIntrinsic" -> Some "="
-    | "op_Inequality" | "GenericInequalityIntrinsic" -> Some "<>"
-    | "op_GreaterThan" | "GenericGreaterThanIntrinsic" -> Some ">"
-    | "op_GreaterThanOrEqual" | "GenericGreaterOrEqualIntrinsic" -> Some ">="
-    | "op_LessThan" | "GenericLessThanIntrinsic" -> Some "<"
-    | "op_LessThanOrEqual" | "GenericLessOrEqualIntrinsic" -> Some "<="
-    | _ -> None
-
-let reverseMethodComparison comparison =
-    match comparison with
-    | ">" -> "<"
-    | ">=" -> "<="
-    | "<" -> ">"
-    | "<=" -> ">="
-    | other -> other
-
 let reverseComparison (expType: ExpressionType) =
     match expType with
     | ExpressionType.GreaterThan -> ExpressionType.LessThan
@@ -476,71 +466,70 @@ let nVisitSqlFn (qualifyColumn: string -> MemberInfo -> string) (nexp: Normalize
     | _ -> notImplMsg $"Expected NMethodCall for SQL function"
 
 let visitWhere<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool>>) (qualifyColumn: string -> MemberInfo -> string) =
-    /// A column/property on a mapped table/record.
-    let (|Column|_|) (exp: Expression) = 
-        match exp with
-        | MappedColumn tables (p, ext) -> Some (p, ext)
+    let (|NColumn|_|) (nexp: NormalizedExpression) =
+        match nexp with
+        | NProperty (p, ext) when tables |> Seq.exists (fun tbl -> tbl.IsInTable p) -> Some (p, ext)
         | _ -> None
 
-    let rec visit (exp: Expression) (query: Query) : Query =
-        match exp with
-        | Lambda x -> visit x.Body query
-        | MethodCall m when m.Method.Name = "Invoke" ->
-            // Handle tuples
-            visit m.Object (Query())
-        | MethodCall m when List.contains m.Method.Name [ nameof isIn; nameof isNotIn; nameof op_BarEqualsBar; nameof op_BarLessGreaterBar ] ->
-            let filter : (string * seq<obj>) -> Query = 
+    /// Evaluate a NormalizedExpression to a runtime value.
+    let nEvaluate (nexp: NormalizedExpression) =
+        match nexp with
+        | NValue v -> v
+        | NMemberAccess(_, m) -> compileAndEvaluateExpression (m :> Expression)
+        | NMethodCall(m, _) -> compileAndEvaluateExpression (m :> Expression)
+        | NUnknown exp -> compileAndEvaluateExpression exp
+        | _ -> notImplMsg $"Unable to evaluate expression: {nexp}"
+
+    let rec visit (nexp: NormalizedExpression) (query: Query) : Query =
+        match nexp with
+        | NMethodCall(m, args) when List.contains m.Method.Name [ nameof isIn; nameof isNotIn; nameof op_BarEqualsBar; nameof op_BarLessGreaterBar ] ->
+            let filter : (string * seq<obj>) -> Query =
                 match m.Method.Name with
                 | nameof isIn | nameof op_BarEqualsBar -> query.WhereIn
                 | _ -> query.WhereNotIn
 
-            match m.Arguments[0], m.Arguments[1] with
-            // Column is IN / NOT IN a subquery of values
-            | Column (p, _), MethodCall subqueryExpr when subqueryExpr.Method.Name = nameof subqueryMany ->
-                let subqueryConst = match subqueryExpr.Arguments[0] with | Constant c -> c | _ -> notImpl()
+            match args.[0], args.[1] with
+            | NColumn (p, _), NMethodCall(subqueryExpr, _) when subqueryExpr.Method.Name = nameof subqueryMany ->
+                let subqueryConst = match subqueryExpr.Arguments.[0] with | Constant c -> c | _ -> notImpl()
                 let alias = visitAlias p.Expression
                 let fqCol = qualifyColumn alias p.Member
                 let selectSubquery = subqueryConst.Value :?> SelectQuery
                 match m.Method.Name with
                 | nameof isIn | nameof op_BarEqualsBar -> query.WhereIn(fqCol, selectSubquery.ToKataQuery())
                 | _ -> query.WhereNotIn(fqCol, selectSubquery.ToKataQuery())
-            // Column is IN / NOT IN a list of values
-            | Column (p, _), ListInit values ->
-                let queryParameters = 
-                    values 
+            | NColumn (p, _), NListInit values ->
+                let queryParameters =
+                    values
                     |> Seq.map (KataUtils.getQueryParameterForValue p.Member)
                     |> Seq.toArray
                 let alias = visitAlias p.Expression
                 let fqCol = qualifyColumn alias p.Member
                 filter(fqCol, queryParameters)
-            // Column is IN / NOT IN an array of values
-            | Column (p, _), ArrayInit values -> 
-                let queryParameters = 
-                    values 
+            | NColumn (p, _), NArrayInit values ->
+                let queryParameters =
+                    values
                     |> Seq.map (KataUtils.getQueryParameterForValue p.Member)
                     |> Seq.toArray
                 let alias = visitAlias p.Expression
                 let fqCol = qualifyColumn alias p.Member
                 filter(fqCol, queryParameters)
-            // Column is IN / NOT IN an IEnumerable of values
-            | Column (p, _), Value value -> 
-                let queryParameters = 
-                    (value :?> System.Collections.IEnumerable) 
-                    |> Seq.cast<obj> 
+            | NColumn (p, _), NValue value ->
+                let queryParameters =
+                    (value :?> System.Collections.IEnumerable)
+                    |> Seq.cast<obj>
                     |> Seq.map (KataUtils.getQueryParameterForValue p.Member)
                     |> Seq.toArray
                 let alias = visitAlias p.Expression
                 let fqCol = qualifyColumn alias p.Member
                 filter(fqCol, queryParameters)
-            // Column is IN / NOT IN a sequence expression of values
-            | Column p, MethodCall c when c.Method.Name = "CreateSequence" ->
+            | NColumn _, NMethodCall(c, _) when c.Method.Name = "CreateSequence" ->
                 notImplMsg "Unable to unwrap sequence expression. Please use a list or array instead."
             | _ -> notImpl()
 
         // like / notLike fns
-        | MethodCall m when List.contains m.Method.Name [ nameof like; nameof notLike; nameof op_EqualsPercent; nameof op_LessGreaterPercent ] ->
-            match m.Arguments.[0], m.Arguments.[1] with
-            | Column (p, _), Value value -> 
+        | NMethodCall(m, args) when List.contains m.Method.Name [ nameof like; nameof notLike; nameof op_EqualsPercent; nameof op_LessGreaterPercent ] ->
+            match args.[0], args.[1] with
+            | NColumn (p, _), NValue value ->
                 let pattern = string value
                 let alias = visitAlias p.Expression
                 let fqCol = qualifyColumn alias p.Member
@@ -550,168 +539,160 @@ let visitWhere<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool>
             | _ -> notImpl()
 
         // isNull / isNotNull
-        | MethodCall m when List.contains m.Method.Name [ nameof isNullValue; "IsNull"; nameof isNotNullValue ] ->
-            match m.Arguments.[0] with
-            | Column (p, _) -> 
+        | NMethodCall(m, args) when List.contains m.Method.Name [ nameof isNullValue; "IsNull"; nameof isNotNullValue ] ->
+            match args.[0] with
+            | NColumn (p, _) ->
                 let alias = visitAlias p.Expression
                 let fqCol = qualifyColumn alias p.Member
-                if m.Method.Name = nameof isNullValue || m.Method.Name = "IsNull" // CompiledName for `isNull` = `IsNull`
+                if m.Method.Name = nameof isNullValue || m.Method.Name = "IsNull"
                 then query.WhereNull(fqCol)
                 else query.WhereNotNull(fqCol)
             | _ -> notImpl()
 
         // areEqual / notEqual
-        | MethodCall m when List.contains m.Method.Name [ nameof areEqual; nameof notEqual ] ->
-            match m.Arguments.[0], m.Arguments.[1] with
-            | Column (p1, _), Column (p2, _) -> 
+        | NMethodCall(m, args) when List.contains m.Method.Name [ nameof areEqual; nameof notEqual ] ->
+            match args.[0], args.[1] with
+            | NColumn (p1, _), NColumn (p2, _) ->
                 let alias1 = visitAlias p1.Expression
                 let fqCol1 = qualifyColumn alias1 p1.Member
                 let alias2 = visitAlias p2.Expression
                 let fqCol2 = qualifyColumn alias2 p2.Member
                 let comparison = if m.Method.Name = nameof areEqual then "=" else "<>"
                 query.WhereColumns(fqCol1, comparison, fqCol2)
-            | Column (p, _), Value value | Value value, Column (p, _) ->
+            | NColumn (p, _), NValue value | NValue value, NColumn (p, _) ->
                 let alias1 = visitAlias p.Expression
                 let fqCol1 = qualifyColumn alias1 p.Member
                 let queryParameter = KataUtils.getQueryParameterForValue p.Member value
                 let comparison = if m.Method.Name = nameof areEqual then "=" else "<>"
                 query.Where(fqCol1, comparison, queryParameter)
-            | Column (p, _), Value null | Value null, Column (p, _) ->
-                let alias = visitAlias p.Expression
-                let fqCol = qualifyColumn alias p.Member
-                if m.Method.Name = nameof areEqual
-                then query.WhereNull(fqCol) 
-                else query.WhereNotNull(fqCol)
             | _ -> notImpl()
-        
-        // Nullable / Option .HasValue / .IsSome `where user.HasValue`; `where user.IsSome`
-        | BoolMember (Column (p, ext)) when 
-            p.Type |> isOptionOrNullableType 
-            && (ext = ExtProperty.HasValue || ext = ExtProperty.IsSome) ->
 
+        // Nullable / Option .HasValue / .IsSome
+        | NMemberAccess(_, bm) & NColumn (p, ext) when
+            bm.Type = typeof<bool>
+            && p.Type |> isOptionOrNullableType
+            && (ext = ExtProperty.HasValue || ext = ExtProperty.IsSome) ->
             let alias = visitAlias p.Expression
             let m = tryGetMember p
             let fqCol = qualifyColumn alias m.Value.Member
             query.WhereNotNull(fqCol)
 
-        // Negated Nullable / Option .HasValue/ .IsSome `where (not user.HasValue)`; `where (not user.IsSome)`
-        | Not (BoolMember (Column (p, ext))) when 
-            p.Type |> isOptionOrNullableType 
+        | NNot (NMemberAccess(_, bm) & NColumn (p, ext)) when
+            bm.Type = typeof<bool>
+            && p.Type |> isOptionOrNullableType
             && (ext = ExtProperty.HasValue || ext = ExtProperty.IsSome) ->
-
             let alias = visitAlias p.Expression
             let m = tryGetMember p
             let fqCol = qualifyColumn alias m.Value.Member
             query.WhereNull(fqCol)
 
-        // Option.IsNone `where user.IsNone`
-        | BoolMember (Column (p, ext)) when 
-            p.Type |> isOptionType 
+        // Option.IsNone
+        | NMemberAccess(_, bm) & NColumn (p, ext) when
+            bm.Type = typeof<bool>
+            && p.Type |> isOptionType
             && ext = ExtProperty.IsNone ->
-
             let alias = visitAlias p.Expression
             let m = tryGetMember p
             let fqCol = qualifyColumn alias m.Value.Member
             query.WhereNull(fqCol)
 
-        // Negated Option.IsNone `where (not user.IsNone)`
-        | Not (BoolMember (Column (p, ext))) when 
-            p.Type |> isOptionType 
+        | NNot (NMemberAccess(_, bm) & NColumn (p, ext)) when
+            bm.Type = typeof<bool>
+            && p.Type |> isOptionType
             && ext = ExtProperty.IsNone ->
-
             let alias = visitAlias p.Expression
             let m = tryGetMember p
             let fqCol = qualifyColumn alias m.Value.Member
             query.WhereNotNull(fqCol)
 
-        // Bool column `where user.IsEnabled`; `where (user.IsEnabled.Value)`
-        | BoolMember (Column (m, _)) ->
-            let alias = visitAlias m.Expression
-            let fqCol = qualifyColumn alias m.Member
+        // Bool column `where user.IsEnabled`
+        | NMemberAccess(_, bm) & NColumn (p, _) when bm.Type = typeof<bool> ->
+            let alias = visitAlias p.Expression
+            let fqCol = qualifyColumn alias p.Member
             query.Where(fqCol, "=", true)
 
-        | Not (BoolMember (Column (m, _))) -> // `where (not user.IsEnabled)`; `where (not user.IsEnabled.Value); NOTE: This must exist before `Not` handler.
-            let alias = visitAlias m.Expression
-            let fqCol = qualifyColumn alias m.Member
+        | NNot (NMemberAccess(_, bm) & NColumn (p, _)) when bm.Type = typeof<bool> ->
+            let alias = visitAlias p.Expression
+            let fqCol = qualifyColumn alias p.Member
             query.Where(fqCol, "=", false)
-        | Not operand ->
+
+        | NNot operand ->
             let operand = visit operand (Query())
             query.WhereNot(fun q -> operand)
-        | BinaryAnd x ->
-            match x.Left with
-            | Value enabled -> 
+
+        | NBinaryAnd(left, right) ->
+            match left with
+            | NValue enabled ->
                 if enabled :?> bool
-                then visit x.Right (Query())
-                else query // short-circuit: if left is false, right is not evaluated
-            | _ -> 
-                let lt = visit x.Left (Query())
-                let rt = visit x.Right (Query())
+                then visit right (Query())
+                else query
+            | _ ->
+                let lt = visit left (Query())
+                let rt = visit right (Query())
                 query.Where(fun q -> lt).Where(fun q -> rt)
-        | BinaryOr x -> 
-            match x.Left with
-            // Allow user to enable or disable right side where clause
-            | Value enabled  -> 
+
+        | NBinaryOr(left, right) ->
+            match left with
+            | NValue enabled ->
                 if enabled :?> bool
-                then visit x.Right (Query())
-                else query // short-circuit: if left is false, right is not evaluated
-            | _ -> 
-                let lt = visit x.Left (Query())
-                let rt = visit x.Right (Query())
+                then visit right (Query())
+                else query
+            | _ ->
+                let lt = visit left (Query())
+                let rt = visit right (Query())
                 query.OrWhere(fun q -> lt).OrWhere(fun q -> rt)
-        | BinaryCompare x ->
-            match x.Left, x.Right with
-            
-            // Handle property to subquery comparisons
-            | Column (p1, _), MethodCall subqueryExpr when subqueryExpr.Method.Name = nameof subqueryOne ->
-                let comparison = getComparison exp.NodeType
+
+        | NBinaryCompare(left, op, right) ->
+            let comparison = getComparison op
+            match left, right with
+
+            // Property to subquery
+            | NColumn (p1, _), NMethodCall(subqueryExpr, _) when subqueryExpr.Method.Name = nameof subqueryOne ->
                 let subqueryConst = match subqueryExpr.Arguments.[0] with | Constant c -> c | _ -> notImpl()
                 let selectSubquery = subqueryConst.Value :?> SelectQuery
                 let alias = visitAlias p1.Expression
                 let fqCol = qualifyColumn alias p1.Member
                 query.Where(fqCol, comparison, selectSubquery.ToKataQuery())
-            
-            // Handle col to col comparisons
-            | Column (p1, _), Column (p2, _) ->
-                let lt = 
+
+            // Col to col
+            | NColumn (p1, _), NColumn (p2, _) ->
+                let lt =
                     let alias = visitAlias p1.Expression
                     qualifyColumn alias p1.Member
-                let comparison = getComparison exp.NodeType
-                let rt = 
+                let rt =
                     let alias = visitAlias p2.Expression
                     qualifyColumn alias p2.Member
-                query.WhereColumns(lt, comparison, rt) 
+                query.WhereColumns(lt, comparison, rt)
 
-            // Column = null comparisons
-            | Column (p, _), Constant null | Constant null, Column (p, _) when exp.NodeType = ExpressionType.Equal ->
+            // Column = null
+            | NColumn (p, _), NConstant(null, _) | NConstant(null, _), NColumn (p, _) when op = ExpressionType.Equal ->
                 let alias = visitAlias p.Expression
                 let fqCol = qualifyColumn alias p.Member
                 query.WhereNull(fqCol)
-            
-            // Column <> null comparisons
-            | Column (p, _), Constant null | Constant null, Column (p, _) when exp.NodeType = ExpressionType.NotEqual ->
+
+            // Column <> null
+            | NColumn (p, _), NConstant(null, _) | NConstant(null, _), NColumn (p, _) when op = ExpressionType.NotEqual ->
                 let alias = visitAlias p.Expression
                 let fqCol = qualifyColumn alias p.Member
                 query.WhereNotNull(fqCol)
-            
-            // Option.IsSome / Nullable.HasValue null check
-            | Column (p, ext), BoolConstant value | BoolConstant value, Column (p, ext) when 
-                p.Type |> isOptionOrNullableType 
-                && (ext = ExtProperty.HasValue || ext = ExtProperty.IsSome) 
-                && exp.NodeType = ExpressionType.Equal ->
 
+            // Option.IsSome / Nullable.HasValue null check (Equal)
+            | NColumn (p, ext), NBoolConstant value | NBoolConstant value, NColumn (p, ext) when
+                p.Type |> isOptionOrNullableType
+                && (ext = ExtProperty.HasValue || ext = ExtProperty.IsSome)
+                && op = ExpressionType.Equal ->
                 let alias = visitAlias p.Expression
                 let m = tryGetMember p
                 let fqCol = qualifyColumn alias m.Value.Member
                 match value with
                 | true -> query.WhereNotNull(fqCol)
-                | false -> query.WhereNull(fqCol)     
-                
-            // Option.IsSome/ Nullable.HasValue null check
-            | Column (p, ext), BoolConstant value | BoolConstant value, Column (p, ext) when 
-                p.Type |> isOptionOrNullableType 
-                && (ext = ExtProperty.HasValue || ext = ExtProperty.IsSome) 
-                && exp.NodeType = ExpressionType.NotEqual ->
+                | false -> query.WhereNull(fqCol)
 
+            // Option.IsSome / Nullable.HasValue null check (NotEqual)
+            | NColumn (p, ext), NBoolConstant value | NBoolConstant value, NColumn (p, ext) when
+                p.Type |> isOptionOrNullableType
+                && (ext = ExtProperty.HasValue || ext = ExtProperty.IsSome)
+                && op = ExpressionType.NotEqual ->
                 let alias = visitAlias p.Expression
                 let fqCol = qualifyColumn alias p.Member
                 match value with
@@ -719,115 +700,98 @@ let visitWhere<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool>
                 | false -> query.WhereNotNull(fqCol)
 
             // Nullable.Value comparisons
-            | Column (p, ext), Value value | Value value, Column (p, ext) when 
-                p.Type |> isOptionOrNullableType 
+            | NColumn (p, ext), NValue value | NValue value, NColumn (p, ext) when
+                p.Type |> isOptionOrNullableType
                 && ext = ExtProperty.Value ->
-
-                let comparison = getComparison exp.NodeType
                 let queryParameter = KataUtils.getQueryParameterForValue p.Member value
                 let alias = visitAlias p.Expression
                 let m = tryGetMember p
                 let fqCol = qualifyColumn alias m.Value.Member
                 query.Where(fqCol, comparison, queryParameter)
 
-            | Column (p, _), _ -> 
-                let value = x.Right |> compileAndEvaluateExpression
-                let comparison = getComparison(exp.NodeType)
+            | NColumn (p, _), _ ->
+                let value = nEvaluate right
                 let alias = visitAlias p.Expression
                 let fqCol = qualifyColumn alias p.Member
                 match value with
-                | null when comparison = "=" -> 
-                    query.WhereNull(fqCol)
-                | null when comparison = "<>" -> 
-                    query.WhereNotNull(fqCol)
-                | _ -> 
-                    let queryParameter = KataUtils.getQueryParameterForValue p.Member value
-                    query.Where(fqCol, comparison, queryParameter)
-
-            | _, Column (p, _) ->
-                let value = x.Left |> compileAndEvaluateExpression
-                let comparison = getReverseComparison(exp.NodeType)
-                let alias = visitAlias p.Expression
-                let fqCol = qualifyColumn alias p.Member
-                match value with
-                | null when comparison = "=" ->
-                    query.WhereNull(fqCol)
-                | null when comparison = "<>" ->
-                    query.WhereNotNull(fqCol)
+                | null when comparison = "=" -> query.WhereNull(fqCol)
+                | null when comparison = "<>" -> query.WhereNotNull(fqCol)
                 | _ ->
                     let queryParameter = KataUtils.getQueryParameterForValue p.Member value
                     query.Where(fqCol, comparison, queryParameter)
 
-            // SQL function compared to value: LEN(p.Name) > 5
-            | MethodCall m, Value value ->
-                let sqlFragment = visitSqlFn qualifyColumn (m :> Expression)
-                let comparison = getComparison exp.NodeType
+            | _, NColumn (p, _) ->
+                let value = nEvaluate left
+                let reversedComparison = getReverseComparison op
+                let alias = visitAlias p.Expression
+                let fqCol = qualifyColumn alias p.Member
+                match value with
+                | null when reversedComparison = "=" -> query.WhereNull(fqCol)
+                | null when reversedComparison = "<>" -> query.WhereNotNull(fqCol)
+                | _ ->
+                    let queryParameter = KataUtils.getQueryParameterForValue p.Member value
+                    query.Where(fqCol, reversedComparison, queryParameter)
+
+            // SQL function compared to value
+            | NMethodCall _, NValue value ->
+                let sqlFragment = nVisitSqlFn qualifyColumn left
                 query.WhereRaw($"{sqlFragment} {comparison} ?", [| value |])
 
-            // Value compared to SQL function: 5 < LEN(p.Name)
-            | Value value, MethodCall m ->
-                let sqlFragment = visitSqlFn qualifyColumn (m :> Expression)
-                let comparison = getReverseComparison exp.NodeType
-                query.WhereRaw($"{sqlFragment} {comparison} ?", [| value |])
+            // Value compared to SQL function
+            | NValue value, NMethodCall _ ->
+                let sqlFragment = nVisitSqlFn qualifyColumn right
+                let reversedComparison = getReverseComparison op
+                query.WhereRaw($"{sqlFragment} {reversedComparison} ?", [| value |])
 
-            // SQL function compared to column: LEN(p.Name) > p.MinLength
-            | MethodCall m, Column (p, _) ->
-                let sqlFragment = visitSqlFn qualifyColumn (m :> Expression)
-                let comparison = getComparison exp.NodeType
+            // SQL function compared to column
+            | NMethodCall _, NColumn (p, _) ->
+                let sqlFragment = nVisitSqlFn qualifyColumn left
                 let alias = visitAlias p.Expression
                 let fqCol = qualifyColumn alias p.Member
                 query.WhereRaw($"{sqlFragment} {comparison} {fqCol}")
 
-            // Column compared to SQL function: p.MinLength < LEN(p.Name)
-            | Column (p, _), MethodCall m ->
+            // Column compared to SQL function
+            | NColumn (p, _), NMethodCall _ ->
                 let alias = visitAlias p.Expression
                 let fqCol = qualifyColumn alias p.Member
-                let sqlFragment = visitSqlFn qualifyColumn (m :> Expression)
-                let comparison = getComparison exp.NodeType
+                let sqlFragment = nVisitSqlFn qualifyColumn right
                 query.WhereRaw($"{fqCol} {comparison} {sqlFragment}")
 
-            // SQL function compared to SQL function: LEN(p.First) > LEN(p.Last)
-            | MethodCall m1, MethodCall m2 ->
-                let sqlFragment1 = visitSqlFn qualifyColumn (m1 :> Expression)
-                let sqlFragment2 = visitSqlFn qualifyColumn (m2 :> Expression)
-                let comparison = getComparison exp.NodeType
+            // SQL function compared to SQL function
+            | NMethodCall _, NMethodCall _ ->
+                let sqlFragment1 = nVisitSqlFn qualifyColumn left
+                let sqlFragment2 = nVisitSqlFn qualifyColumn right
                 query.WhereRaw($"{sqlFragment1} {comparison} {sqlFragment2}")
 
-            | Value v1, Value v2 ->
+            | NValue _, NValue _ ->
                 notImplMsg("Value to value comparisons are not currently supported. Ex: where (1 = 1)")
             | _ ->
                 notImpl()
 
         | _ ->
-            notImplMsg $"Unsupported expression type in where clause: {exp.NodeType} ({exp})"
+            notImplMsg $"Unsupported expression type in where clause: {nexp}"
 
-    visit (ExpressionNormalizer.normalize (filter :> Expression)) (Query())
+    visit (ExpressionNormalizer.toNormalizedExpression (filter :> Expression)) (Query())
 
 let visitHaving<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool>>) (qualifyColumn: string -> MemberInfo -> string) =
-    /// A column/property on a mapped table/record.
-    let (|Column|_|) (exp: Expression) = 
-        match exp with
-        | MappedColumn tables (p, ext) -> Some (p, ext)
+    let (|NColumn|_|) (nexp: NormalizedExpression) =
+        match nexp with
+        | NProperty (p, ext) when tables |> Seq.exists (fun tbl -> tbl.IsInTable p) -> Some (p, ext)
         | _ -> None
 
-    let rec visit (exp: Expression) (query: Query) : Query =
-        match exp with
-        | Lambda x -> visit x.Body query
-        | Not operand ->
+    let rec visit (nexp: NormalizedExpression) (query: Query) : Query =
+        match nexp with
+        | NNot operand ->
             let operand = visit operand (Query())
             query.HavingNot(fun q -> operand)
-        | MethodCall m when m.Method.Name = "Invoke" ->
-            // Handle tuples
-            visit m.Object (Query())
-        | MethodCall m when List.contains m.Method.Name [ nameof isIn; nameof isNotIn; nameof op_BarEqualsBar; nameof op_BarLessGreaterBar ] ->
-            let filter : (string * seq<obj>) -> Query = 
+        | NMethodCall(m, args) when List.contains m.Method.Name [ nameof isIn; nameof isNotIn; nameof op_BarEqualsBar; nameof op_BarLessGreaterBar ] ->
+            let filter : (string * seq<obj>) -> Query =
                 match m.Method.Name with
                 | nameof isIn | nameof op_BarEqualsBar -> query.HavingIn
                 | _ -> query.HavingNotIn
 
-            match m.Arguments.[0], m.Arguments.[1] with
-            // Column is IN / NOT IN a subquery of values
-            | Column (p, _), MethodCall subqueryExpr when subqueryExpr.Method.Name = nameof subqueryMany ->
+            match args.[0], args.[1] with
+            | NColumn (p, _), NMethodCall(subqueryExpr, _) when subqueryExpr.Method.Name = nameof subqueryMany ->
                 let subqueryConst = match subqueryExpr.Arguments.[0] with | Constant c -> c | _ -> notImpl()
                 let alias = visitAlias p.Expression
                 let fqCol = qualifyColumn alias p.Member
@@ -835,136 +799,117 @@ let visitHaving<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool
                 match m.Method.Name with
                 | nameof isIn | nameof op_BarEqualsBar -> query.HavingIn(fqCol, selectSubquery.ToKataQuery())
                 | _ -> query.HavingNotIn(fqCol, selectSubquery.ToKataQuery())
-            // Column is IN / NOT IN a list of values
-            | Column (p, _), ListInit values ->
-                let queryParameters = 
-                    values 
+            | NColumn (p, _), NListInit values ->
+                let queryParameters =
+                    values
                     |> Seq.map (KataUtils.getQueryParameterForValue p.Member)
                     |> Seq.toArray
-
                 let alias = visitAlias p.Expression
                 let fqCol = qualifyColumn alias p.Member
                 filter(fqCol, queryParameters)
-            // Column is IN / NOT IN an array of values
-            | Column (p, _), ArrayInit values -> 
-                let queryParameters = 
-                    values 
+            | NColumn (p, _), NArrayInit values ->
+                let queryParameters =
+                    values
                     |> Seq.map (KataUtils.getQueryParameterForValue p.Member)
                     |> Seq.toArray
-
                 let alias = visitAlias p.Expression
                 let fqCol = qualifyColumn alias p.Member
                 filter(fqCol, queryParameters)
-            // Column is IN / NOT IN an IEnumerable of values
-            | Column (p, _), Value value -> 
-                let queryParameters = 
-                    (value :?> System.Collections.IEnumerable) 
-                    |> Seq.cast<obj> 
+            | NColumn (p, _), NValue value ->
+                let queryParameters =
+                    (value :?> System.Collections.IEnumerable)
+                    |> Seq.cast<obj>
                     |> Seq.map (KataUtils.getQueryParameterForValue p.Member)
                     |> Seq.toArray
-
                 let alias = visitAlias p.Expression
                 let fqCol = qualifyColumn alias p.Member
                 filter(fqCol, queryParameters)
-            // Column is IN / NOT IN a sequence expression of values
-            | Column (p, _), MethodCall c when c.Method.Name = "CreateSequence" ->
+            | NColumn _, NMethodCall(c, _) when c.Method.Name = "CreateSequence" ->
                 notImplMsg "Unable to unwrap sequence expression. Please use a list or array instead."
             | _ -> notImpl()
-        | MethodCall m when List.contains m.Method.Name [ nameof like; nameof notLike; nameof op_EqualsPercent; nameof op_LessGreaterPercent ] ->
-            match m.Arguments.[0], m.Arguments.[1] with
-            | Column (p, _), Value value -> 
+        | NMethodCall(m, args) when List.contains m.Method.Name [ nameof like; nameof notLike; nameof op_EqualsPercent; nameof op_LessGreaterPercent ] ->
+            match args.[0], args.[1] with
+            | NColumn (p, _), NValue value ->
                 let pattern = string value
                 match m.Method.Name with
-                | nameof like | nameof op_EqualsPercent -> 
+                | nameof like | nameof op_EqualsPercent ->
                     let alias = visitAlias p.Expression
                     let fqCol = qualifyColumn alias p.Member
                     query.HavingLike(fqCol, pattern, false)
-                | _ -> 
+                | _ ->
                     let alias = visitAlias p.Expression
                     let fqCol = qualifyColumn alias p.Member
                     query.HavingNotLike(fqCol, pattern, false)
             | _ -> notImpl()
-        | MethodCall m when m.Method.Name = nameof isNullValue || m.Method.Name = nameof isNotNullValue ->
-            match m.Arguments.[0] with
-            | Column (p, _) -> 
+        | NMethodCall(m, args) when m.Method.Name = nameof isNullValue || m.Method.Name = nameof isNotNullValue ->
+            match args.[0] with
+            | NColumn (p, _) ->
                 let alias = visitAlias p.Expression
                 let fqCol = qualifyColumn alias p.Member
                 if m.Method.Name = nameof isNullValue
                 then query.HavingNull(fqCol)
                 else query.HavingNotNull(fqCol)
             | _ -> notImpl()
-        | MethodCall m when List.contains m.Method.Name [ nameof minBy; nameof maxBy; nameof sumBy; nameof avgBy; nameof countBy; nameof avgByAs ] ->
-            // Handle aggregate columns
-            visit m.Arguments.[0] query
-        | BinaryAnd x ->
-            let lt = visit x.Left (Query())
-            let rt = visit x.Right (Query())
+        | NMethodCall(m, args) when List.contains m.Method.Name [ nameof minBy; nameof maxBy; nameof sumBy; nameof avgBy; nameof countBy; nameof avgByAs ] ->
+            visit args.[0] query
+        | NBinaryAnd(left, right) ->
+            let lt = visit left (Query())
+            let rt = visit right (Query())
             query.Having(fun q -> lt).Having(fun q -> rt)
-        | BinaryOr x -> 
-            let lt = visit x.Left (Query())
-            let rt = visit x.Right (Query())
+        | NBinaryOr(left, right) ->
+            let lt = visit left (Query())
+            let rt = visit right (Query())
             query.OrHaving(fun q -> lt).OrHaving(fun q -> rt)
-        | BinaryCompare x ->
-            match x.Left, x.Right with            
-            | Column (p1, _), MethodCall subqueryExpr when subqueryExpr.Method.Name = nameof subqueryOne ->
-                // Handle property to subquery comparisons
-                let comparison = getComparison exp.NodeType
+        | NBinaryCompare(left, op, right) ->
+            let comparison = getComparison op
+            match left, right with
+            | NColumn (p1, _), NMethodCall(subqueryExpr, _) when subqueryExpr.Method.Name = nameof subqueryOne ->
                 let subqueryConst = match subqueryExpr.Arguments.[0] with | Constant c -> c | _ -> notImpl()
                 let selectSubquery = subqueryConst.Value :?> SelectQuery
                 let alias = visitAlias p1.Expression
                 let fqCol = qualifyColumn alias p1.Member
                 query.Having(fqCol, comparison, selectSubquery.ToKataQuery())
-            | AggregateColumn (aggType, (p1, _)), Column (p2, _) ->
-                // Handle aggregate col to col comparisons
-                let lt = 
+            | NAggregateColumn (aggType, (p1, _)), NColumn (p2, _) ->
+                let lt =
                     let alias = visitAlias p1.Expression
                     qualifyColumn alias p1.Member
-                let comparison = getComparison exp.NodeType
-                let rt = 
+                let rt =
                     let alias = visitAlias p2.Expression
                     qualifyColumn alias p2.Member
                 query.HavingRaw($"{aggType}({lt}) {comparison} {rt}")
-            | AggregateColumn (aggType, (p, _)), Value value ->
-                // Handle aggregate column to value comparisons
+            | NAggregateColumn (aggType, (p, _)), NValue value ->
                 let alias = visitAlias p.Expression
                 let lt = qualifyColumn alias p.Member
-                let comparison = getComparison(exp.NodeType)
                 query.HavingRaw($"{aggType}({lt}) {comparison} ?", [value])
-            | Column (p1, _), Column (p2, _) ->
-                // Handle col to col comparisons
-                let lt = 
+            | NColumn (p1, _), NColumn (p2, _) ->
+                let lt =
                     let alias = visitAlias p1.Expression
                     qualifyColumn alias p1.Member
-                let comparison = getComparison exp.NodeType
-                let rt = 
+                let rt =
                     let alias = visitAlias p2.Expression
                     qualifyColumn alias p2.Member
                 query.HavingColumns(lt, comparison, rt)
-            | Column (p, _), Value value ->
-                // Handle column to value comparisons
-                match exp.NodeType, value with
-                | ExpressionType.Equal, null -> 
+            | NColumn (p, _), NValue value ->
+                match op, value with
+                | ExpressionType.Equal, null ->
                     let alias = visitAlias p.Expression
                     query.WhereNull(qualifyColumn alias p.Member)
-                | ExpressionType.NotEqual, null -> 
+                | ExpressionType.NotEqual, null ->
                     let alias = visitAlias p.Expression
                     query.WhereNotNull(qualifyColumn alias p.Member)
-                | _ ->                     
-                    let comparison = getComparison(exp.NodeType)
+                | _ ->
                     let queryParameter = KataUtils.getQueryParameterForValue p.Member value
                     let alias = visitAlias p.Expression
                     query.Where(qualifyColumn alias p.Member, comparison, queryParameter)
-            | Value _, Value _ ->
-                // Not implemented because I didn't want to embed logic to properly format strings, dates, etc.
-                // This can be easily added later if it is implemented in Dapper.FSharp.
+            | NValue _, NValue _ ->
                 notImplMsg("Value to value comparisons are not currently supported. Ex: having (1 = 1)")
             | _ ->
                 notImpl()
 
         | _ ->
-            notImplMsg $"Unsupported expression type in having clause: {exp.NodeType} ({exp})"
+            notImplMsg $"Unsupported expression type in having clause: {nexp}"
 
-    visit (ExpressionNormalizer.normalize (filter :> Expression)) (Query())
+    visit (ExpressionNormalizer.toNormalizedExpression (filter :> Expression)) (Query())
 
 /// Returns a list of one or more fully qualified column names: ["{schema}.{table}.{column}"]
 let visitPropertiesSelector<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) (qualifyColumn: string -> MemberInfo -> string) =
@@ -1171,21 +1116,16 @@ let visitJoinPredicate<'T> (tables: TableMapping seq) (predicate: Expression<Fun
 
 /// Returns a list of one or more fully qualified table names: ["{schema}.{table}"]
 let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
-    let rec visit (exp: Expression) : Selection list =
-        match exp with
-        | Lambda x -> visit x.Body
-        | MethodCall m when m.Method.Name = "Invoke" ->
-            // Handle tuples
-            visit m.Object
-        | MethodCall m when m.Method.Name = "Some" ->
-            // Columns selected from leftJoined tables may be wrapped in `Some` to make them optional.
-            visit m.Arguments.[0]
-        // Handle direct OptionModule.Map calls (newer FSharp.Core may emit these instead of op_PipeRight)
-        | MethodCall m when m.Method.Name = "Map"
+    let rec visit (nexp: NormalizedExpression) : Selection list =
+        match nexp with
+        | NMethodCall(m, args) when m.Method.Name = "Some" ->
+            visit args.[0]
+        // Handle direct OptionModule.Map calls
+        | NMethodCall(m, args) when m.Method.Name = "Map"
             && m.Method.DeclaringType <> null
             && m.Method.DeclaringType.Name = "OptionModule"
-            && m.Arguments.Count = 2 ->
-            let source = m.Arguments.[1]
+            && args.Length = 2 ->
+            let source = m.Arguments.[1] // original Expression for visitAlias
             let mappingArg = m.Arguments.[0]
             let rec extractMember (exp: Expression) =
                 match exp with
@@ -1198,8 +1138,9 @@ let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
                 let alias = visitAlias source
                 [ SelectedColumn (alias, memberExp.Member.Name, memberExp.Type, true, false) ]
             | None -> notImplMsg $"Unsupported Option.map mapping expression: {mappingArg.NodeType}"
-        | MethodCall m when m.Method.Name = "op_PipeRight" && m.Arguments.Count = 2 ->
+        | NMethodCall(m, _) when m.Method.Name = "op_PipeRight" && m.Arguments.Count = 2 ->
             // Handle: r |> Option.map _.ColumnA
+            // Use original Expression arguments for the complex Option.map lambda extraction
             let source = m.Arguments.[0]
             let pipeArg = m.Arguments.[1]
             let rec findOptionMapLambda (exp: Expression) =
@@ -1247,40 +1188,35 @@ let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
                     | _ -> notImplMsg $"Unsupported Option.map lambda body: {mapLam.Body.NodeType}"
                 | None -> notImplMsg $"Could not extract mapping lambda from Option.map expression"
             else
-                // Not an Option.map pipe; fall through to generic SQL function handling
                 let qualifyCol alias (mem: MemberInfo) = $"{{%s{alias}}}.{{%s{mem.Name}}}"
                 let sqlFragment = visitSqlFn qualifyCol (m :> Expression)
                 [ SelectedExpression sqlFragment ]
-        | AggregateColumn (aggType, (p, _)) ->
+        | NAggregateColumn (aggType, (p, _)) ->
             let alias = visitAlias p.Expression
             let fqCol = $"{{%s{alias}}}.{{%s{p.Member.Name}}}"
             [ SelectedExpression $"{aggType}({fqCol})" ]
-        | MethodCall m ->
-            // Treat any other method call as a SQL function
+        | NMethodCall(m, _) ->
             let qualifyCol alias (mem: MemberInfo) = $"{{%s{alias}}}.{{%s{mem.Name}}}"
             let sqlFragment = visitSqlFn qualifyCol (m :> Expression)
             [ SelectedExpression sqlFragment ]
-        | New n -> 
-            // Handle a tuple of multiple tables
-            n.Arguments 
-            |> Seq.map visit |> Seq.toList |> List.concat
-        | Parameter p -> 
+        | NNew(_, args) ->
+            args |> List.collect visit
+        | NParameter p ->
             [ SelectedTable (p.Name, p.Type) ]
-        | Member m -> 
-            if m.Member.DeclaringType |> isOptionOrNullableType then 
-                visit m.Expression
-            else 
+        | NMemberAccess(inner, m) ->
+            if m.Member.DeclaringType |> isOptionOrNullableType then
+                visit inner
+            else
                 let isOptional, isNullable =
                     if m.Type.IsGenericType && m.Type.GetGenericTypeDefinition() = typedefof<Option<_>> then true, false
                     elif m.Type.IsGenericType && m.Type.GetGenericTypeDefinition() = typedefof<Nullable<_>> then false, true
                     else false, false
-
                 let alias = visitAlias m.Expression
                 [ SelectedColumn (alias, m.Member.Name, m.Type, isOptional, isNullable) ]
         | _ ->
             notImpl()
 
-    visit (ExpressionNormalizer.normalize (propertySelector :> Expression))
+    visit (ExpressionNormalizer.toNormalizedExpression (propertySelector :> Expression))
 
 /// Tracks how each alias is used in the projection expression.
 type AliasUsage = {
