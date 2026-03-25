@@ -286,6 +286,26 @@ let getComparison (expType: ExpressionType) =
     | ExpressionType.LessThanOrEqual -> "<="
     | _ -> notImplMsg "Unsupported comparison type"
 
+/// Maps comparison operator method names (e.g., op_Equality) to SQL comparison strings.
+/// Newer FSharp.Core versions may emit comparisons as MethodCall expressions instead of BinaryExpression nodes.
+let (|ComparisonOperatorMethod|_|) (m: MethodCallExpression) =
+    match m.Method.Name with
+    | "op_Equality" | "GenericEqualityIntrinsic" -> Some "="
+    | "op_Inequality" | "GenericInequalityIntrinsic" -> Some "<>"
+    | "op_GreaterThan" | "GenericGreaterThanIntrinsic" -> Some ">"
+    | "op_GreaterThanOrEqual" | "GenericGreaterOrEqualIntrinsic" -> Some ">="
+    | "op_LessThan" | "GenericLessThanIntrinsic" -> Some "<"
+    | "op_LessThanOrEqual" | "GenericLessOrEqualIntrinsic" -> Some "<="
+    | _ -> None
+
+let reverseMethodComparison comparison =
+    match comparison with
+    | ">" -> "<"
+    | ">=" -> "<="
+    | "<" -> ">"
+    | "<=" -> ">="
+    | other -> other
+
 let reverseComparison (expType: ExpressionType) =
     match expType with
     | ExpressionType.GreaterThan -> ExpressionType.LessThan
@@ -346,6 +366,10 @@ let visitWhere<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool>
     let rec visit (exp: Expression) (query: Query) : Query =
         match exp with
         | Lambda x -> visit x.Body query
+        | :? BlockExpression as blk ->
+            // Newer FSharp.Core versions may wrap lambda bodies in BlockExpressions.
+            // The last expression in the block is the result.
+            visit (blk.Expressions |> Seq.last) query
         | MethodCall m when m.Method.Name = "Invoke" ->
             // Handle tuples
             visit m.Object (Query())
@@ -658,8 +682,83 @@ let visitWhere<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool>
                 notImplMsg("Value to value comparisons are not currently supported. Ex: where (1 = 1)")
             | _ ->
                 notImpl()
+
+        // Handle comparison operators emitted as method calls (newer FSharp.Core versions)
+        | MethodCall (ComparisonOperatorMethod comparison & m) when m.Arguments.Count = 2 ->
+            match m.Arguments.[0], m.Arguments.[1] with
+            // Handle property to subquery comparisons
+            | Column (p1, _), MethodCall subqueryExpr when subqueryExpr.Method.Name = nameof subqueryOne ->
+                let subqueryConst = match subqueryExpr.Arguments.[0] with | Constant c -> c | _ -> notImpl()
+                let selectSubquery = subqueryConst.Value :?> SelectQuery
+                let alias = visitAlias p1.Expression
+                let fqCol = qualifyColumn alias p1.Member
+                query.Where(fqCol, comparison, selectSubquery.ToKataQuery())
+
+            // Handle col to col comparisons
+            | Column (p1, _), Column (p2, _) ->
+                let lt =
+                    let alias = visitAlias p1.Expression
+                    qualifyColumn alias p1.Member
+                let rt =
+                    let alias = visitAlias p2.Expression
+                    qualifyColumn alias p2.Member
+                query.WhereColumns(lt, comparison, rt)
+
+            // Column = null comparisons
+            | Column (p, _), Constant null | Constant null, Column (p, _) when comparison = "=" ->
+                let alias = visitAlias p.Expression
+                let fqCol = qualifyColumn alias p.Member
+                query.WhereNull(fqCol)
+
+            // Column <> null comparisons
+            | Column (p, _), Constant null | Constant null, Column (p, _) when comparison = "<>" ->
+                let alias = visitAlias p.Expression
+                let fqCol = qualifyColumn alias p.Member
+                query.WhereNotNull(fqCol)
+
+            // Nullable.Value comparisons
+            | Column (p, ext), Value value | Value value, Column (p, ext) when
+                p.Type |> isOptionOrNullableType
+                && ext = ExtProperty.Value ->
+
+                let queryParameter = KataUtils.getQueryParameterForValue p.Member value
+                let alias = visitAlias p.Expression
+                let m = tryGetMember p
+                let fqCol = qualifyColumn alias m.Value.Member
+                query.Where(fqCol, comparison, queryParameter)
+
+            | Column (p, _), _ ->
+                let value = m.Arguments.[1] |> compileAndEvaluateExpression
+                let alias = visitAlias p.Expression
+                let fqCol = qualifyColumn alias p.Member
+                match value with
+                | null when comparison = "=" ->
+                    query.WhereNull(fqCol)
+                | null when comparison = "<>" ->
+                    query.WhereNotNull(fqCol)
+                | _ ->
+                    let queryParameter = KataUtils.getQueryParameterForValue p.Member value
+                    query.Where(fqCol, comparison, queryParameter)
+
+            | _, Column (p, _) ->
+                let value = m.Arguments.[0] |> compileAndEvaluateExpression
+                let reversedComparison = reverseMethodComparison comparison
+                let alias = visitAlias p.Expression
+                let fqCol = qualifyColumn alias p.Member
+                match value with
+                | null when reversedComparison = "=" ->
+                    query.WhereNull(fqCol)
+                | null when reversedComparison = "<>" ->
+                    query.WhereNotNull(fqCol)
+                | _ ->
+                    let queryParameter = KataUtils.getQueryParameterForValue p.Member value
+                    query.Where(fqCol, reversedComparison, queryParameter)
+
+            | _ ->
+                notImplMsg $"Unsupported comparison operator method call: {m.Method.Name}({m.Arguments.[0].NodeType}, {m.Arguments.[1].NodeType})"
+
         | _ ->
-            notImpl()
+            notImplMsg $"Unsupported expression type in where clause: {exp.NodeType} ({exp})"
 
     visit (filter :> Expression) (Query())
 
@@ -673,7 +772,9 @@ let visitHaving<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool
     let rec visit (exp: Expression) (query: Query) : Query =
         match exp with
         | Lambda x -> visit x.Body query
-        | Not operand -> 
+        | :? BlockExpression as blk ->
+            visit (blk.Expressions |> Seq.last) query
+        | Not operand ->
             let operand = visit operand (Query())
             query.HavingNot(fun q -> operand)
         | MethodCall m when m.Method.Name = "Invoke" ->
@@ -820,8 +921,39 @@ let visitHaving<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool
                 notImplMsg("Value to value comparisons are not currently supported. Ex: having (1 = 1)")
             | _ ->
                 notImpl()
+
+        // Handle comparison operators emitted as method calls (newer FSharp.Core versions)
+        | MethodCall (ComparisonOperatorMethod comparison & m) when m.Arguments.Count = 2 ->
+            match m.Arguments.[0], m.Arguments.[1] with
+            | AggregateColumn (aggType, (p, _)), Value value ->
+                let alias = visitAlias p.Expression
+                let lt = qualifyColumn alias p.Member
+                query.HavingRaw($"{aggType}({lt}) {comparison} ?", [value])
+            | Column (p1, _), Column (p2, _) ->
+                let lt =
+                    let alias = visitAlias p1.Expression
+                    qualifyColumn alias p1.Member
+                let rt =
+                    let alias = visitAlias p2.Expression
+                    qualifyColumn alias p2.Member
+                query.HavingColumns(lt, comparison, rt)
+            | Column (p, _), Value value ->
+                match comparison, value with
+                | "=", null ->
+                    let alias = visitAlias p.Expression
+                    query.WhereNull(qualifyColumn alias p.Member)
+                | "<>", null ->
+                    let alias = visitAlias p.Expression
+                    query.WhereNotNull(qualifyColumn alias p.Member)
+                | _ ->
+                    let queryParameter = KataUtils.getQueryParameterForValue p.Member value
+                    let alias = visitAlias p.Expression
+                    query.Where(qualifyColumn alias p.Member, comparison, queryParameter)
+            | _ ->
+                notImplMsg $"Unsupported comparison operator method call in having: {m.Method.Name}({m.Arguments.[0].NodeType}, {m.Arguments.[1].NodeType})"
+
         | _ ->
-            notImpl()
+            notImplMsg $"Unsupported expression type in having clause: {exp.NodeType} ({exp})"
 
     visit (filter :> Expression) (Query())
 
@@ -830,6 +962,7 @@ let visitPropertiesSelector<'T, 'Prop> (propertySelector: Expression<Func<'T, 'P
     let rec visit (exp: Expression) : string list =
         match exp with
         | Lambda x -> visit x.Body
+        | :? BlockExpression as blk -> visit (blk.Expressions |> Seq.last)
         | MethodCall m when m.Method.Name = "Invoke" ->
             // Handle tuples
             visit m.Object
@@ -855,6 +988,7 @@ let visitOrderByPropertySelector<'T, 'Prop> (propertySelector: Expression<Func<'
     let rec visit (exp: Expression) : OrderBy =
         match exp with
         | Lambda x -> visit x.Body
+        | :? BlockExpression as blk -> visit (blk.Expressions |> Seq.last)
         | MethodCall m when m.Method.Name = "Invoke" ->
             // Handle tuples
             visit m.Object
@@ -896,6 +1030,7 @@ let visitJoin<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
     let rec visit (exp: Expression) : JoinedPropertyInfo list =
         match exp with
         | Lambda x -> visit x.Body
+        | :? BlockExpression as blk -> visit (blk.Expressions |> Seq.last)
         | MethodCall m when m.Method.Name = "Invoke" ->
             // Handle tuples
             visit m.Object
@@ -919,6 +1054,7 @@ let visitPropertySelector<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Pro
     let rec visit (exp: Expression) : MemberInfo =
         match exp with
         | Lambda x -> visit x.Body
+        | :? BlockExpression as blk -> visit (blk.Expressions |> Seq.last)
         | MethodCall m when m.Method.Name = "Invoke" ->
             // Handle tuples
             visit m.Object
@@ -976,6 +1112,7 @@ let visitJoinPredicate<'T> (tables: TableMapping seq) (predicate: Expression<Fun
     let rec visit (exp: Expression) (j: SqlKata.Join) : SqlKata.Join =
         match exp with
         | Lambda x -> visit x.Body j
+        | :? BlockExpression as blk -> visit (blk.Expressions |> Seq.last) j
         | MethodCall m when m.Method.Name = "Invoke" ->
             // Handle tuples
             visit m.Object j
@@ -1057,6 +1194,7 @@ let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
     let rec visit (exp: Expression) : Selection list =
         match exp with
         | Lambda x -> visit x.Body
+        | :? BlockExpression as blk -> visit (blk.Expressions |> Seq.last)
         | MethodCall m when m.Method.Name = "Invoke" ->
             // Handle tuples
             visit m.Object

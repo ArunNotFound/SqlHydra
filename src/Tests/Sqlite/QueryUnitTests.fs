@@ -450,7 +450,7 @@ let ``Implicit Casts Option aciq's example``() =
     ()
 
 [<Test>]
-let ``Implicit Casts Option``() = 
+let ``Implicit Casts Option``() =
     let _ =
         select {
             for p in main.Product do
@@ -459,3 +459,22 @@ let ``Implicit Casts Option``() =
 
     // should not throw exception
     ()
+
+[<Test>]
+let ``Where Join with DateTime Comparisons - GitHub Issue 124``() =
+    let lBound = System.DateTime(2024, 6, 20, 8, 0, 0)
+    let uBound = System.DateTime(2024, 6, 20, 10, 0, 0)
+
+    let sql =
+        select {
+            for o in main.SalesOrderHeader do
+            join d in main.SalesOrderDetail on (o.SalesOrderID = d.SalesOrderID)
+            where (o.OrderDate = lBound && lBound <= d.ModifiedDate && d.ModifiedDate <= uBound)
+            select (o, d)
+        }
+        |> toSql
+
+    sql.Contains("WHERE") =! true
+    sql.Contains("\"o\".\"OrderDate\" = @p0") =! true
+    sql.Contains("\"d\".\"ModifiedDate\" >= @p1") =! true
+    sql.Contains("\"d\".\"ModifiedDate\" <= @p2") =! true
