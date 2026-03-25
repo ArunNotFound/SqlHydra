@@ -277,6 +277,119 @@ module SqlPatterns =
             | _ -> notImplMsg "Invalid argument to aggregate function."
         | _ -> None
 
+// ─── NormalizedExpression Patterns ───────────────────────────────────────────
+// Active patterns on NormalizedExpression that delegate to existing Expression
+// patterns for semantic checks. No semantic logic is duplicated.
+
+open ExpressionNormalizer
+
+[<AutoOpen>]
+module NormalizedPatterns =
+
+    /// Extracts alias by following NMemberAccess chain to NParameter.
+    let rec nVisitAlias (nexp: NormalizedExpression) : string =
+        match nexp with
+        | NMemberAccess(inner, _) -> nVisitAlias inner
+        | NParameter p -> p.Name
+        | _ -> notImpl()
+
+    /// Binary AND (And or AndAlso).
+    let (|NBinaryAnd|_|) (nexp: NormalizedExpression) =
+        match nexp with
+        | NBinary(left, op, right) when op = ExpressionType.And || op = ExpressionType.AndAlso -> Some (left, right)
+        | _ -> None
+
+    /// Binary OR (Or or OrElse).
+    let (|NBinaryOr|_|) (nexp: NormalizedExpression) =
+        match nexp with
+        | NBinary(left, op, right) when op = ExpressionType.Or || op = ExpressionType.OrElse -> Some (left, right)
+        | _ -> None
+
+    /// Binary comparison (=, <>, >, >=, <, <=). Returns (left, op, right).
+    let (|NBinaryCompare|_|) (nexp: NormalizedExpression) =
+        match nexp with
+        | NBinary(left, op, right) ->
+            match op with
+            | ExpressionType.Equal | ExpressionType.NotEqual
+            | ExpressionType.GreaterThan | ExpressionType.GreaterThanOrEqual
+            | ExpressionType.LessThan | ExpressionType.LessThanOrEqual -> Some (left, op, right)
+            | _ -> None
+        | _ -> None
+
+    /// Not / negation.
+    let (|NNot|_|) (nexp: NormalizedExpression) =
+        match nexp with
+        | NUnary(ExpressionType.Not, operand) -> Some operand
+        | _ -> None
+
+    /// Bool member access.
+    let (|NBoolMember|_|) (nexp: NormalizedExpression) =
+        match nexp with
+        | NMemberAccess(_, m) when m.Type = typeof<bool> -> Some m
+        | _ -> None
+
+    /// Bool constant.
+    let (|NBoolConstant|_|) (nexp: NormalizedExpression) =
+        match nexp with
+        | NConstant(v, t) when t = typeof<bool> -> Some (v :?> bool)
+        | _ -> None
+
+    /// Property with extended info (Option/Nullable awareness).
+    /// Delegates to the existing Property active pattern on the original MemberExpression.
+    let (|NProperty|_|) (nexp: NormalizedExpression) =
+        match nexp with
+        | NMemberAccess(_, m) ->
+            match (m :> Expression) with
+            | Property (p, ext) -> Some (p, ext)
+            | _ -> None
+        | _ -> None
+
+    /// A constant value or an evaluable expression.
+    /// Delegates to compileAndEvaluateExpression for non-constant evaluable expressions.
+    let (|NValue|_|) (nexp: NormalizedExpression) =
+        match nexp with
+        | NConstant(v, _) -> Some v
+        | NMethodCall(call, _) when call.Method.Module.Name <> "SqlHydra.Query.dll" ->
+            compileAndEvaluateExpression (call :> Expression) |> Some
+        | NMemberAccess(NConstant _, m) ->
+            // Evaluable member access on a constant (e.g., captured variable from closure)
+            compileAndEvaluateExpression (m :> Expression) |> Some
+        | NUnary(ExpressionType.Convert, NConstant(v, t)) when t.IsPrimitive ->
+            // Handle implicit conversions (e.g., int to int64)
+            Some v
+        | NUnknown exp when exp <> null ->
+            try compileAndEvaluateExpression exp |> Some
+            with _ -> None
+        | _ -> None
+
+    /// Aggregate column pattern (minBy, maxBy, sumBy, avgBy, countBy, avgByAs).
+    let (|NAggregateColumn|_|) (nexp: NormalizedExpression) =
+        match nexp with
+        | NMethodCall(m, _) when List.contains m.Method.Name [ nameof minBy; nameof maxBy; nameof sumBy; nameof avgBy; nameof countBy; nameof avgByAs ] ->
+            let aggType = m.Method.Name.Replace("By", "").Replace("As", "").ToUpper()
+            match m.Arguments.[0] with
+            | Property p -> Some (aggType, p)
+            | _ -> notImplMsg "Invalid argument to aggregate function."
+        | _ -> None
+
+    /// List initializer — delegates to original ListInit pattern.
+    let (|NListInit|_|) (nexp: NormalizedExpression) =
+        match nexp with
+        | NMethodCall(call, _) when call.Method.Name = "Cons" ->
+            match (call :> Expression) with
+            | ListInit values -> Some values
+            | _ -> None
+        | _ -> None
+
+    /// Array initializer — delegates to original ArrayInit pattern.
+    let (|NArrayInit|_|) (nexp: NormalizedExpression) =
+        match nexp with
+        | NUnknown exp ->
+            match exp with
+            | ArrayInit values -> Some values
+            | _ -> None
+        | _ -> None
+
 let getComparison (expType: ExpressionType) =
     match expType with
     | ExpressionType.Equal -> "="
@@ -356,6 +469,11 @@ let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (exp: Express
     | _ ->
         notImplMsg $"Expected a method call expression but got: {exp.NodeType}"
 
+/// Delegates to existing visitSqlFn by extracting the original MethodCallExpression.
+let nVisitSqlFn (qualifyColumn: string -> MemberInfo -> string) (nexp: NormalizedExpression) : string =
+    match nexp with
+    | NMethodCall(m, _) -> visitSqlFn qualifyColumn (m :> Expression)
+    | _ -> notImplMsg $"Expected NMethodCall for SQL function"
 
 let visitWhere<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool>>) (qualifyColumn: string -> MemberInfo -> string) =
     /// A column/property on a mapped table/record.
@@ -850,23 +968,17 @@ let visitHaving<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool
 
 /// Returns a list of one or more fully qualified column names: ["{schema}.{table}.{column}"]
 let visitPropertiesSelector<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) (qualifyColumn: string -> MemberInfo -> string) =
-    let rec visit (exp: Expression) : string list =
-        match exp with
-        | Lambda x -> visit x.Body
-        | MethodCall m when m.Method.Name = "Invoke" ->
-            // Handle tuples
-            visit m.Object
-        | New n ->
-            // Handle groupBy that returns a tuple of multiple columns
-            n.Arguments |> Seq.map visit |> Seq.toList |> List.concat
-        | Member m ->
-            // Handle groupBy for a single column
-            let alias = visitAlias m.Expression
+    let rec visit (nexp: NormalizedExpression) : string list =
+        match nexp with
+        | NNew(_, args) ->
+            args |> List.collect visit
+        | NMemberAccess(inner, m) ->
+            let alias = nVisitAlias inner
             let column = qualifyColumn alias m.Member
             [column]
         | _ -> notImpl()
 
-    visit (ExpressionNormalizer.normalize (propertySelector :> Expression))
+    visit (ExpressionNormalizer.toNormalizedExpression (propertySelector :> Expression))
 
 type OrderBy =
     | OrderByColumn of tableAlias: string * MemberInfo
@@ -875,38 +987,34 @@ type OrderBy =
 
 /// Returns a column MemberInfo.
 let visitOrderByPropertySelector<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
-    let rec visit (exp: Expression) : OrderBy =
-        match exp with
-        | Lambda x -> visit x.Body
-        | MethodCall m when m.Method.Name = "Invoke" ->
-            // Handle tuples
-            visit m.Object
-        | MethodCall m when m.Method.Name = nameof op_HatHat ->
+    let rec visit (nexp: NormalizedExpression) : OrderBy =
+        match nexp with
+        | NMethodCall(m, args) when m.Method.Name = nameof op_HatHat ->
             // ^^ operator conditionally adds property to order by clause
-            match m.Arguments[0], m.Arguments[1] with
-            | Value enabled, Property (p, _) ->
-                if enabled :?> bool then 
+            match args.[0], args.[1] with
+            | NValue enabled, NProperty (p, _) ->
+                if enabled :?> bool then
                     let alias = visitAlias p.Expression
                     OrderByColumn (alias, p.Member)
                 else
                     OrderByIgnored
-            | _ -> 
-                notImpl()            
-        | AggregateColumn (aggType, (p, _)) -> 
+            | _ ->
+                notImpl()
+        | NAggregateColumn (aggType, (p, _)) ->
             let alias = visitAlias p.Expression
             OrderByAggregateColumn (aggType, alias, p.Member)
-        | Member m -> 
-            if m.Member.DeclaringType |> isOptionOrNullableType then 
-                visit m.Expression
-            else 
+        | NMemberAccess(inner, m) ->
+            if m.Member.DeclaringType |> isOptionOrNullableType then
+                visit inner
+            else
                 let alias = visitAlias m.Expression
                 OrderByColumn (alias, m.Member)
-        | Property (p, _) -> 
+        | NProperty (p, _) ->
             let alias = visitAlias p.Expression
             OrderByColumn (alias, p.Member)
         | _ -> notImpl()
 
-    visit (ExpressionNormalizer.normalize (propertySelector :> Expression))
+    visit (ExpressionNormalizer.toNormalizedExpression (propertySelector :> Expression))
 
 type JoinedPropertyInfo = 
     {
@@ -916,43 +1024,38 @@ type JoinedPropertyInfo =
 
 /// Returns one or more column members
 let visitJoin<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
-    let rec visit (exp: Expression) : JoinedPropertyInfo list =
-        match exp with
-        | Lambda x -> visit x.Body
-        | MethodCall m when m.Method.Name = "Invoke" ->
-            // Handle tuples
-            visit m.Object
-        | New n ->
-            // Handle groupBy that returns a tuple of multiple columns
-            n.Arguments |> Seq.map visit |> Seq.toList |> List.collect id
-        | Member m ->
-            let alias = visitAlias m.Expression
+    let rec visit (nexp: NormalizedExpression) : JoinedPropertyInfo list =
+        match nexp with
+        | NNew(_, args) ->
+            args |> List.collect visit
+        | NMethodCall(m, args) when m.Method.Name = "Some" ->
+            // Option.Some wrapping — visit the inner argument
+            visit args.[0]
+        | NMemberAccess(inner, m) ->
             if m.Member.DeclaringType |> isOptionOrNullableType
-            then visit m.Expression
-            else [ { Alias = alias; Member = m.Member } ]
-        | Property (p, _) ->
+            then visit inner
+            else
+                let alias = visitAlias m.Expression
+                [ { Alias = alias; Member = m.Member } ]
+        | NProperty (p, _) ->
             let alias = visitAlias p.Expression
-            [ { Alias = alias; Member = p.Member }  ]
+            [ { Alias = alias; Member = p.Member } ]
         | _ -> notImpl()
 
-    visit (ExpressionNormalizer.normalize (propertySelector :> Expression))
+    visit (ExpressionNormalizer.toNormalizedExpression (propertySelector :> Expression))
 
 /// Returns a column MemberInfo.
 let visitPropertySelector<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
-    let rec visit (exp: Expression) : MemberInfo =
-        match exp with
-        | Lambda x -> visit x.Body
-        | MethodCall m when m.Method.Name = "Invoke" ->
-            // Handle tuples
-            visit m.Object
-        | Member m ->
+    let rec visit (nexp: NormalizedExpression) : MemberInfo =
+        match nexp with
+        | NMemberAccess(inner, m) ->
             if m.Member.DeclaringType |> isOptionOrNullableType
-            then visit m.Expression
+            then visit inner
             else m.Member
-        | Property (p, _) -> p.Member
+        | NProperty (p, _) -> p.Member
         | _ -> notImpl()
 
-    visit (ExpressionNormalizer.normalize (propertySelector :> Expression))
+    visit (ExpressionNormalizer.toNormalizedExpression (propertySelector :> Expression))
 
 type Selection =
     | SelectedTable of tableAlias: string * tableType: Type
@@ -991,89 +1094,80 @@ module SelectExprStore =
 /// Used by the `on'` operation to support predicate-style joins.
 let visitJoinPredicate<'T> (tables: TableMapping seq) (predicate: Expression<Func<'T, bool>>) (qualifyColumn: string -> MemberInfo -> string) =
     /// A column/property on a mapped table/record.
-    let (|Column|_|) (exp: Expression) =
-        match exp with
-        | MappedColumn tables (p, ext) -> Some (p, ext)
+    let (|NColumn|_|) (nexp: NormalizedExpression) =
+        match nexp with
+        | NProperty (p, ext) when tables |> Seq.exists (fun tbl -> tbl.IsInTable p) -> Some (p, ext)
         | _ -> None
 
-    let rec visit (exp: Expression) (j: SqlKata.Join) : SqlKata.Join =
-        match exp with
-        | Lambda x -> visit x.Body j
-        | MethodCall m when m.Method.Name = "Invoke" ->
-            // Handle tuples
-            visit m.Object j
-        | BinaryAnd x ->
-            // Visit left and right sides, chaining .On() calls
-            let j' = visit x.Left j
-            visit x.Right j'
-        | BinaryOr x ->
-            // For OR conditions, we need to use OrOn
-            let leftJoin = visit x.Left (SqlKata.Join())
-            let rightJoin = visit x.Right (SqlKata.Join())
+    let rec visit (nexp: NormalizedExpression) (j: SqlKata.Join) : SqlKata.Join =
+        match nexp with
+        | NBinaryAnd(left, right) ->
+            let j' = visit left j
+            visit right j'
+        | NBinaryOr(left, right) ->
+            let leftJoin = visit left (SqlKata.Join())
+            let rightJoin = visit right (SqlKata.Join())
             j.Where(fun _ -> leftJoin).OrWhere(fun _ -> rightJoin)
-        | BinaryCompare x ->
-            match x.Left, x.Right with
+        | NBinaryCompare(left, op, right) ->
+            let comparison = getComparison op
+            match left, right with
             // Handle col to col comparisons (the primary join case)
-            | Column (p1, ext1), Column (p2, ext2) ->
+            | NColumn (p1, _), NColumn (p2, _) ->
                 let lt =
                     let alias = visitAlias p1.Expression
                     qualifyColumn alias p1.Member
-                let comparison = getComparison exp.NodeType
                 let rt =
                     let alias = visitAlias p2.Expression
                     qualifyColumn alias p2.Member
                 j.On(lt, rt, comparison)
 
-            // Handle column to value comparisons (e.g., d.Type = "SomeValue")
-            | Column (p, ext), Value value ->
+            // Handle column to value comparisons
+            | NColumn (p, _), NValue value ->
                 let alias = visitAlias p.Expression
                 let fqCol = qualifyColumn alias p.Member
-                let comparison = getComparison exp.NodeType
                 match value with
-                | null when comparison = "=" ->
-                    j.WhereNull(fqCol)
-                | null when comparison = "<>" ->
-                    j.WhereNotNull(fqCol)
+                | null when comparison = "=" -> j.WhereNull(fqCol)
+                | null when comparison = "<>" -> j.WhereNotNull(fqCol)
                 | _ ->
                     let queryParameter = KataUtils.getQueryParameterForValue p.Member value
                     j.Where(fqCol, comparison, queryParameter)
 
             // Handle value to column comparisons (reversed)
-            | Value value, Column (p, ext) ->
+            | NValue value, NColumn (p, _) ->
                 let alias = visitAlias p.Expression
                 let fqCol = qualifyColumn alias p.Member
-                let comparison = getReverseComparison exp.NodeType
+                let reversedComparison = getReverseComparison op
                 match value with
-                | null when comparison = "=" ->
-                    j.WhereNull(fqCol)
-                | null when comparison = "<>" ->
-                    j.WhereNotNull(fqCol)
+                | null when reversedComparison = "=" -> j.WhereNull(fqCol)
+                | null when reversedComparison = "<>" -> j.WhereNotNull(fqCol)
                 | _ ->
                     let queryParameter = KataUtils.getQueryParameterForValue p.Member value
-                    j.Where(fqCol, comparison, queryParameter)
+                    j.Where(fqCol, reversedComparison, queryParameter)
 
             // Nullable.Value / Option.Value comparisons
-            | Column (p, ext), _ when ext = ExtProperty.Value ->
-                let value = x.Right |> compileAndEvaluateExpression
-                let comparison = getComparison exp.NodeType
+            | NColumn (p, ext), _ when ext = ExtProperty.Value ->
+                let value =
+                    match right with
+                    | NValue v -> v
+                    | NMemberAccess(_, m) -> compileAndEvaluateExpression (m :> Expression)
+                    | NUnknown exp -> compileAndEvaluateExpression exp
+                    | _ -> notImplMsg "Unable to evaluate join predicate value"
                 let alias = visitAlias p.Expression
                 let m = tryGetMember p
                 let fqCol = qualifyColumn alias m.Value.Member
                 match value with
-                | null when comparison = "=" ->
-                    j.WhereNull(fqCol)
-                | null when comparison = "<>" ->
-                    j.WhereNotNull(fqCol)
+                | null when comparison = "=" -> j.WhereNull(fqCol)
+                | null when comparison = "<>" -> j.WhereNotNull(fqCol)
                 | _ ->
                     let queryParameter = KataUtils.getQueryParameterForValue p.Member value
                     j.Where(fqCol, comparison, queryParameter)
 
             | _ ->
-                notImplMsg $"Unsupported join predicate comparison: {x.Left.NodeType} {exp.NodeType} {x.Right.NodeType}"
+                notImplMsg $"Unsupported join predicate comparison: {op}"
         | _ ->
-            notImplMsg $"Unsupported join predicate expression: {exp.NodeType}"
+            notImplMsg $"Unsupported join predicate expression: {nexp}"
 
-    fun (j: SqlKata.Join) -> visit (ExpressionNormalizer.normalize (predicate :> Expression)) j
+    fun (j: SqlKata.Join) -> visit (ExpressionNormalizer.toNormalizedExpression (predicate :> Expression)) j
 
 /// Returns a list of one or more fully qualified table names: ["{schema}.{table}"]
 let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
