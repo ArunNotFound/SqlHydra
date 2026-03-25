@@ -9,34 +9,6 @@ open FastExpressionCompiler
 let notImpl() = raise (NotImplementedException())
 let notImplMsg msg = raise (NotImplementedException msg)
 
-/// Inlines block variable assignments, replacing variable references with their assigned values.
-/// Newer FSharp.Core versions (10.1+) wrap lambda bodies in BlockExpressions that introduce
-/// local variables. This visitor substitutes those variables so downstream pattern matching
-/// sees the original expression tree shapes.
-type private BlockInliner(substitutions: System.Collections.Generic.Dictionary<ParameterExpression, Expression>) =
-    inherit ExpressionVisitor()
-    override _.VisitParameter(node) =
-        match substitutions.TryGetValue(node) with
-        | true, value -> base.Visit(value)
-        | _ -> node :> Expression
-
-/// Unwraps a BlockExpression by selectively inlining variable assignments into the result (last) expression.
-/// Only inlines variables whose assignments are NOT member accesses (tuple deconstructions like
-/// `o = tupledArg.Item1` must be preserved so that visitAlias extracts the correct table alias).
-let inlineBlock (blk: BlockExpression) =
-    let substitutions = System.Collections.Generic.Dictionary<ParameterExpression, Expression>()
-    for expr in blk.Expressions do
-        if expr.NodeType = ExpressionType.Assign then
-            let bin = expr :?> BinaryExpression
-            match bin.Left with
-            | :? ParameterExpression as p when bin.Right.NodeType <> ExpressionType.MemberAccess ->
-                substitutions.[p] <- bin.Right
-            | _ -> ()
-    let result = blk.Expressions |> Seq.last
-    if substitutions.Count > 0 then
-        BlockInliner(substitutions).Visit(result)
-    else
-        result
 
 [<AutoOpen>]
 module VisitorPatterns =
@@ -395,7 +367,6 @@ let visitWhere<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool>
     let rec visit (exp: Expression) (query: Query) : Query =
         match exp with
         | Lambda x -> visit x.Body query
-        | :? BlockExpression as blk -> visit (blk.Expressions |> Seq.last) query
         | MethodCall m when m.Method.Name = "Invoke" ->
             // Handle tuples
             visit m.Object (Query())
@@ -709,84 +680,10 @@ let visitWhere<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool>
             | _ ->
                 notImpl()
 
-        // Handle comparison operators emitted as method calls (newer FSharp.Core versions)
-        | MethodCall (ComparisonOperatorMethod comparison & m) when m.Arguments.Count = 2 ->
-            match m.Arguments.[0], m.Arguments.[1] with
-            // Handle property to subquery comparisons
-            | Column (p1, _), MethodCall subqueryExpr when subqueryExpr.Method.Name = nameof subqueryOne ->
-                let subqueryConst = match subqueryExpr.Arguments.[0] with | Constant c -> c | _ -> notImpl()
-                let selectSubquery = subqueryConst.Value :?> SelectQuery
-                let alias = visitAlias p1.Expression
-                let fqCol = qualifyColumn alias p1.Member
-                query.Where(fqCol, comparison, selectSubquery.ToKataQuery())
-
-            // Handle col to col comparisons
-            | Column (p1, _), Column (p2, _) ->
-                let lt =
-                    let alias = visitAlias p1.Expression
-                    qualifyColumn alias p1.Member
-                let rt =
-                    let alias = visitAlias p2.Expression
-                    qualifyColumn alias p2.Member
-                query.WhereColumns(lt, comparison, rt)
-
-            // Column = null comparisons
-            | Column (p, _), Constant null | Constant null, Column (p, _) when comparison = "=" ->
-                let alias = visitAlias p.Expression
-                let fqCol = qualifyColumn alias p.Member
-                query.WhereNull(fqCol)
-
-            // Column <> null comparisons
-            | Column (p, _), Constant null | Constant null, Column (p, _) when comparison = "<>" ->
-                let alias = visitAlias p.Expression
-                let fqCol = qualifyColumn alias p.Member
-                query.WhereNotNull(fqCol)
-
-            // Nullable.Value comparisons
-            | Column (p, ext), Value value | Value value, Column (p, ext) when
-                p.Type |> isOptionOrNullableType
-                && ext = ExtProperty.Value ->
-
-                let queryParameter = KataUtils.getQueryParameterForValue p.Member value
-                let alias = visitAlias p.Expression
-                let m = tryGetMember p
-                let fqCol = qualifyColumn alias m.Value.Member
-                query.Where(fqCol, comparison, queryParameter)
-
-            | Column (p, _), _ ->
-                let value = m.Arguments.[1] |> compileAndEvaluateExpression
-                let alias = visitAlias p.Expression
-                let fqCol = qualifyColumn alias p.Member
-                match value with
-                | null when comparison = "=" ->
-                    query.WhereNull(fqCol)
-                | null when comparison = "<>" ->
-                    query.WhereNotNull(fqCol)
-                | _ ->
-                    let queryParameter = KataUtils.getQueryParameterForValue p.Member value
-                    query.Where(fqCol, comparison, queryParameter)
-
-            | _, Column (p, _) ->
-                let value = m.Arguments.[0] |> compileAndEvaluateExpression
-                let reversedComparison = reverseMethodComparison comparison
-                let alias = visitAlias p.Expression
-                let fqCol = qualifyColumn alias p.Member
-                match value with
-                | null when reversedComparison = "=" ->
-                    query.WhereNull(fqCol)
-                | null when reversedComparison = "<>" ->
-                    query.WhereNotNull(fqCol)
-                | _ ->
-                    let queryParameter = KataUtils.getQueryParameterForValue p.Member value
-                    query.Where(fqCol, reversedComparison, queryParameter)
-
-            | _ ->
-                notImplMsg $"Unsupported comparison operator method call: {m.Method.Name}({m.Arguments.[0].NodeType}, {m.Arguments.[1].NodeType})"
-
         | _ ->
             notImplMsg $"Unsupported expression type in where clause: {exp.NodeType} ({exp})"
 
-    visit (filter :> Expression) (Query())
+    visit (ExpressionNormalizer.normalize (filter :> Expression)) (Query())
 
 let visitHaving<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool>>) (qualifyColumn: string -> MemberInfo -> string) =
     /// A column/property on a mapped table/record.
@@ -798,7 +695,6 @@ let visitHaving<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool
     let rec visit (exp: Expression) (query: Query) : Query =
         match exp with
         | Lambda x -> visit x.Body query
-        | :? BlockExpression as blk -> visit (blk.Expressions |> Seq.last) query
         | Not operand ->
             let operand = visit operand (Query())
             query.HavingNot(fun q -> operand)
@@ -947,47 +843,16 @@ let visitHaving<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool
             | _ ->
                 notImpl()
 
-        // Handle comparison operators emitted as method calls (newer FSharp.Core versions)
-        | MethodCall (ComparisonOperatorMethod comparison & m) when m.Arguments.Count = 2 ->
-            match m.Arguments.[0], m.Arguments.[1] with
-            | AggregateColumn (aggType, (p, _)), Value value ->
-                let alias = visitAlias p.Expression
-                let lt = qualifyColumn alias p.Member
-                query.HavingRaw($"{aggType}({lt}) {comparison} ?", [value])
-            | Column (p1, _), Column (p2, _) ->
-                let lt =
-                    let alias = visitAlias p1.Expression
-                    qualifyColumn alias p1.Member
-                let rt =
-                    let alias = visitAlias p2.Expression
-                    qualifyColumn alias p2.Member
-                query.HavingColumns(lt, comparison, rt)
-            | Column (p, _), Value value ->
-                match comparison, value with
-                | "=", null ->
-                    let alias = visitAlias p.Expression
-                    query.WhereNull(qualifyColumn alias p.Member)
-                | "<>", null ->
-                    let alias = visitAlias p.Expression
-                    query.WhereNotNull(qualifyColumn alias p.Member)
-                | _ ->
-                    let queryParameter = KataUtils.getQueryParameterForValue p.Member value
-                    let alias = visitAlias p.Expression
-                    query.Where(qualifyColumn alias p.Member, comparison, queryParameter)
-            | _ ->
-                notImplMsg $"Unsupported comparison operator method call in having: {m.Method.Name}({m.Arguments.[0].NodeType}, {m.Arguments.[1].NodeType})"
-
         | _ ->
             notImplMsg $"Unsupported expression type in having clause: {exp.NodeType} ({exp})"
 
-    visit (filter :> Expression) (Query())
+    visit (ExpressionNormalizer.normalize (filter :> Expression)) (Query())
 
 /// Returns a list of one or more fully qualified column names: ["{schema}.{table}.{column}"]
 let visitPropertiesSelector<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) (qualifyColumn: string -> MemberInfo -> string) =
     let rec visit (exp: Expression) : string list =
         match exp with
         | Lambda x -> visit x.Body
-        | :? BlockExpression as blk -> visit (blk.Expressions |> Seq.last)
         | MethodCall m when m.Method.Name = "Invoke" ->
             // Handle tuples
             visit m.Object
@@ -1001,7 +866,7 @@ let visitPropertiesSelector<'T, 'Prop> (propertySelector: Expression<Func<'T, 'P
             [column]
         | _ -> notImpl()
 
-    visit (propertySelector :> Expression)
+    visit (ExpressionNormalizer.normalize (propertySelector :> Expression))
 
 type OrderBy =
     | OrderByColumn of tableAlias: string * MemberInfo
@@ -1013,7 +878,6 @@ let visitOrderByPropertySelector<'T, 'Prop> (propertySelector: Expression<Func<'
     let rec visit (exp: Expression) : OrderBy =
         match exp with
         | Lambda x -> visit x.Body
-        | :? BlockExpression as blk -> visit (blk.Expressions |> Seq.last)
         | MethodCall m when m.Method.Name = "Invoke" ->
             // Handle tuples
             visit m.Object
@@ -1042,7 +906,7 @@ let visitOrderByPropertySelector<'T, 'Prop> (propertySelector: Expression<Func<'
             OrderByColumn (alias, p.Member)
         | _ -> notImpl()
 
-    visit (propertySelector :> Expression)
+    visit (ExpressionNormalizer.normalize (propertySelector :> Expression))
 
 type JoinedPropertyInfo = 
     {
@@ -1055,42 +919,40 @@ let visitJoin<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
     let rec visit (exp: Expression) : JoinedPropertyInfo list =
         match exp with
         | Lambda x -> visit x.Body
-        | :? BlockExpression as blk -> visit (blk.Expressions |> Seq.last)
         | MethodCall m when m.Method.Name = "Invoke" ->
             // Handle tuples
             visit m.Object
-        | New n -> 
+        | New n ->
             // Handle groupBy that returns a tuple of multiple columns
             n.Arguments |> Seq.map visit |> Seq.toList |> List.collect id
-        | Member m -> 
+        | Member m ->
             let alias = visitAlias m.Expression
             if m.Member.DeclaringType |> isOptionOrNullableType
             then visit m.Expression
             else [ { Alias = alias; Member = m.Member } ]
-        | Property (p, _) -> 
+        | Property (p, _) ->
             let alias = visitAlias p.Expression
             [ { Alias = alias; Member = p.Member }  ]
         | _ -> notImpl()
 
-    visit (propertySelector :> Expression)
+    visit (ExpressionNormalizer.normalize (propertySelector :> Expression))
 
 /// Returns a column MemberInfo.
 let visitPropertySelector<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
     let rec visit (exp: Expression) : MemberInfo =
         match exp with
         | Lambda x -> visit x.Body
-        | :? BlockExpression as blk -> visit (blk.Expressions |> Seq.last)
         | MethodCall m when m.Method.Name = "Invoke" ->
             // Handle tuples
             visit m.Object
-        | Member m -> 
+        | Member m ->
             if m.Member.DeclaringType |> isOptionOrNullableType
             then visit m.Expression
             else m.Member
         | Property (p, _) -> p.Member
         | _ -> notImpl()
 
-    visit (propertySelector :> Expression)
+    visit (ExpressionNormalizer.normalize (propertySelector :> Expression))
 
 type Selection =
     | SelectedTable of tableAlias: string * tableType: Type
@@ -1137,7 +999,6 @@ let visitJoinPredicate<'T> (tables: TableMapping seq) (predicate: Expression<Fun
     let rec visit (exp: Expression) (j: SqlKata.Join) : SqlKata.Join =
         match exp with
         | Lambda x -> visit x.Body j
-        | :? BlockExpression as blk -> visit (blk.Expressions |> Seq.last) j
         | MethodCall m when m.Method.Name = "Invoke" ->
             // Handle tuples
             visit m.Object j
@@ -1212,14 +1073,13 @@ let visitJoinPredicate<'T> (tables: TableMapping seq) (predicate: Expression<Fun
         | _ ->
             notImplMsg $"Unsupported join predicate expression: {exp.NodeType}"
 
-    fun (j: SqlKata.Join) -> visit (predicate :> Expression) j
+    fun (j: SqlKata.Join) -> visit (ExpressionNormalizer.normalize (predicate :> Expression)) j
 
 /// Returns a list of one or more fully qualified table names: ["{schema}.{table}"]
 let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
     let rec visit (exp: Expression) : Selection list =
         match exp with
         | Lambda x -> visit x.Body
-        | :? BlockExpression as blk -> visit (inlineBlock blk)
         | MethodCall m when m.Method.Name = "Invoke" ->
             // Handle tuples
             visit m.Object
@@ -1246,26 +1106,17 @@ let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
             | None -> notImplMsg $"Unsupported Option.map mapping expression: {mappingArg.NodeType}"
         | MethodCall m when m.Method.Name = "op_PipeRight" && m.Arguments.Count = 2 ->
             // Handle: r |> Option.map _.ColumnA
-            // The F# compiler generates: op_PipeRight(source, Lambda(...ToFSharpFunc(Lambda(Option.Map(...)))).Invoke(ToFSharpFunc(Lambda(mapping))))
-            // We extract the source from Arg0 and the mapping lambda from the Invoke argument.
             let source = m.Arguments.[0]
-            // Unwrap nested BlockExpressions (newer FSharp.Core may wrap sub-expressions in blocks)
-            let rec unwrapBlocks (exp: Expression) =
-                match exp with
-                | :? BlockExpression as blk -> unwrapBlocks (inlineBlock blk)
-                | _ -> exp
-            let pipeArg = unwrapBlocks m.Arguments.[1]
+            let pipeArg = m.Arguments.[1]
             let rec findOptionMapLambda (exp: Expression) =
                 match exp with
                 | :? MethodCallExpression as invoke when invoke.Method.Name = "Invoke" ->
-                    // The Invoke argument contains the mapping function wrapped in ToFSharpFunc(Lambda(...))
                     match invoke.Arguments.[0] with
                     | :? MethodCallExpression as toFF when toFF.Method.Name = "ToFSharpFunc" ->
                         match toFF.Arguments.[0] with
                         | :? LambdaExpression as mapLam -> Some mapLam
                         | _ -> None
                     | _ -> None
-                // Newer FSharp.Core: OptionModule.Map(mapping, source) — extract the mapping lambda
                 | :? MethodCallExpression as mc when
                     mc.Method.Name = "Map"
                     && mc.Method.DeclaringType <> null
@@ -1273,21 +1124,17 @@ let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
                     && mc.Arguments.Count = 2 ->
                     match mc.Arguments.[0] with
                     | :? LambdaExpression as mapLam -> Some mapLam
-                    // mapping may be wrapped in ToFSharpFunc
                     | :? MethodCallExpression as toFF when toFF.Method.Name = "ToFSharpFunc" ->
                         match toFF.Arguments.[0] with
                         | :? LambdaExpression as mapLam -> Some mapLam
                         | _ -> None
                     | _ -> None
-                // Unwrap ToFSharpFunc(Lambda(...)) wrapping (newer FSharp.Core block inlining)
                 | :? MethodCallExpression as mc when mc.Method.Name = "ToFSharpFunc" && mc.Arguments.Count = 1 ->
                     match mc.Arguments.[0] with
                     | :? LambdaExpression as lam -> findOptionMapLambda lam.Body
                     | _ -> None
                 | :? LambdaExpression as lam -> findOptionMapLambda lam.Body
-                | :? BlockExpression as blk -> findOptionMapLambda (inlineBlock blk)
                 | _ -> None
-            // Verify this is actually wrapping OptionModule.Map by checking the lambda body chain
             let rec containsOptionMap (exp: Expression) =
                 match exp with
                 | :? MethodCallExpression as mc ->
@@ -1295,7 +1142,6 @@ let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
                     || mc.Arguments |> Seq.exists containsOptionMap
                     || (mc.Object <> null && containsOptionMap mc.Object)
                 | :? LambdaExpression as lam -> containsOptionMap lam.Body
-                | :? BlockExpression as blk -> containsOptionMap (inlineBlock blk)
                 | _ -> false
             if containsOptionMap pipeArg then
                 match findOptionMapLambda pipeArg with
@@ -1340,7 +1186,7 @@ let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
         | _ ->
             notImpl()
 
-    visit (propertySelector :> Expression)
+    visit (ExpressionNormalizer.normalize (propertySelector :> Expression))
 
 /// Tracks how each alias is used in the projection expression.
 type AliasUsage = {
