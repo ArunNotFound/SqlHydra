@@ -1,9 +1,9 @@
-﻿module SqlHydra.SqlServer.Provider
+module SqlHydra.SqlServer.Provider
 
 open SqlHydra.Domain
 
-type SqlServerProvider() =
-    interface ISqlHydraDbProvider with
+let instance: ISqlHydraDbProvider =
+    { new ISqlHydraDbProvider with
         member _.Id = "mssql"
         member _.Name = "SqlHydra.SqlServer"
         member _.Type = SqlServer
@@ -12,3 +12,4 @@ type SqlServerProvider() =
         member _.SqlKataCompiler = "SqlKata.Compilers.SqlServerCompiler()"
         member _.ProviderConnectionType = "Microsoft.Data.SqlClient.SqlConnection"
         member _.GetSchema(cfg, isLegacy) = SqlServerSchemaProvider.getSchema(cfg, isLegacy)
+    }

@@ -1,9 +1,9 @@
-﻿module SqlHydra.Npgsql.Provider
+module SqlHydra.Npgsql.Provider
 
 open SqlHydra.Domain
 
-type NpgsqlProvider() =
-    interface ISqlHydraDbProvider with
+let instance: ISqlHydraDbProvider =
+    { new ISqlHydraDbProvider with
         member _.Id = "npgsql"
         member _.Name = "SqlHydra.Npgsql"
         member _.Type = Npgsql
@@ -12,3 +12,4 @@ type NpgsqlProvider() =
         member _.SqlKataCompiler = "SqlKata.Compilers.PostgresCompiler()"
         member _.ProviderConnectionType = "Npgsql.NpgsqlConnection"
         member _.GetSchema(cfg, isLegacy) = NpgsqlSchemaProvider.getSchema(cfg, isLegacy)
+    }

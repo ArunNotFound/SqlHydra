@@ -1,9 +1,9 @@
-﻿module SqlHydra.Oracle.Provider
+module SqlHydra.Oracle.Provider
 
 open SqlHydra.Domain
 
-type OracleProvider() =
-    interface ISqlHydraDbProvider with
+let instance: ISqlHydraDbProvider =
+    { new ISqlHydraDbProvider with
         member _.Id = "oracle"
         member _.Name = "SqlHydra.Oracle"
         member _.Type = Oracle
@@ -12,3 +12,4 @@ type OracleProvider() =
         member _.SqlKataCompiler = "SqlKata.Compilers.OracleCompiler()"
         member _.ProviderConnectionType = "Oracle.ManagedDataAccess.Client.OracleConnection"
         member _.GetSchema(cfg, isLegacy) = OracleSchemaProvider.getSchema(cfg, isLegacy)
+    }

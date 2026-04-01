@@ -1,9 +1,9 @@
-﻿module SqlHydra.MySql.Provider
+module SqlHydra.MySql.Provider
 
 open SqlHydra.Domain
 
-type MySqlProvider() =
-    interface ISqlHydraDbProvider with
+let instance: ISqlHydraDbProvider =
+    { new ISqlHydraDbProvider with
         member _.Id = "mysql"
         member _.Name = "SqlHydra.MySql"
         member _.Type = MySql
@@ -12,3 +12,4 @@ type MySqlProvider() =
         member _.SqlKataCompiler = "SqlKata.Compilers.MySqlCompiler()"
         member _.ProviderConnectionType = "MySql.Data.MySqlClient.MySqlConnection"
         member _.GetSchema(cfg, isLegacy) = MySqlSchemaProvider.getSchema(cfg, isLegacy)
+    }

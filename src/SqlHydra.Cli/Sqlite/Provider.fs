@@ -1,9 +1,9 @@
-﻿module SqlHydra.Sqlite.Provider
+module SqlHydra.Sqlite.Provider
 
 open SqlHydra.Domain
 
-type SqliteProvider() =
-    interface ISqlHydraDbProvider with
+let instance: ISqlHydraDbProvider =
+    { new ISqlHydraDbProvider with
         member _.Id = "sqlite"
         member _.Name = "SqlHydra.Sqlite"
         member _.Type = Sqlite
@@ -12,3 +12,4 @@ type SqliteProvider() =
         member _.SqlKataCompiler = "SqlKata.Compilers.SqliteCompiler()"
         member _.ProviderConnectionType = "Microsoft.Data.Sqlite.SqliteConnection"
         member _.GetSchema(cfg, isLegacy) = SqliteSchemaProvider.getSchema(cfg, isLegacy)
+    }

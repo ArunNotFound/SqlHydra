@@ -35,11 +35,11 @@ let main argv =
             |> desc "The database provider id: 'mssql', 'npgsql', 'sqlite', 'mysql', or 'oracle'"
             |> tryParse (fun res ->
                 match res.Tokens[0].Value with
-                | "mssql" ->  Ok (SqlServer.Provider.SqlServerProvider() :> ISqlHydraDbProvider)
-                | "npgsql" -> Ok (Npgsql.Provider.NpgsqlProvider() :> ISqlHydraDbProvider)
-                | "sqlite" -> Ok (Sqlite.Provider.SqliteProvider() :> ISqlHydraDbProvider)
-                | "mysql" ->  Ok (MySql.Provider.MySqlProvider() :> ISqlHydraDbProvider)
-                | "oracle" -> Ok (Oracle.Provider.OracleProvider() :> ISqlHydraDbProvider)
+                | "mssql" ->  Ok SqlServer.Provider.instance
+                | "npgsql" -> Ok Npgsql.Provider.instance
+                | "sqlite" -> Ok Sqlite.Provider.instance
+                | "mysql" ->  Ok MySql.Provider.instance
+                | "oracle" -> Ok Oracle.Provider.instance
                 | providerId -> Error $"Invalid provider id: '{providerId}'. Valid options are: 'mssql', 'npgsql', 'sqlite', 'mysql', or 'oracle'."
             ),
             
