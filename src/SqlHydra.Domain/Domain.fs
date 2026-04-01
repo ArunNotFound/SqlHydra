@@ -121,33 +121,20 @@ and [<RequireQualifiedAccess>]
     | Option
     | Nullable
 
-type Provider =
-    {
-        Id: string
-        Name: string
-        Type: ProviderType
-        DefaultReaderType: string
-        DefaultProvider: string
-        GetSchema: Config * bool -> Schema
-    }
-
-and ProviderType =
+type ProviderType =
     | SqlServer
     | Npgsql
     | Sqlite
     | MySql
     | Oracle
-
-type ProviderMetadata =
-    {
-        Id: string
-        Name: string
-        Type: ProviderType
-        DefaultReaderType: string
-        DefaultProvider: string
-    }
+    | Custom of string
 
 type ISqlHydraDbProvider =
-    abstract member CreateMappings: isLegacy: bool -> Map<string, TypeMapping>
+    abstract member Id: string
+    abstract member Name: string
+    abstract member Type: ProviderType
+    abstract member DefaultReaderType: string
+    abstract member DefaultProvider: string
+    abstract member SqlKataCompiler: string
+    abstract member ProviderConnectionType: string
     abstract member GetSchema: cfg: Config * isLegacy: bool -> Schema
-    abstract member ProviderMetadata: ProviderMetadata

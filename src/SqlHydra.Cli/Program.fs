@@ -6,7 +6,7 @@ open Input
 open Console
 open Domain
 
-let run (provider: Provider, tomlFile: IO.FileInfo option, project: IO.FileInfo option, connString: string option) =
+let run (provider: ISqlHydraDbProvider, tomlFile: IO.FileInfo option, project: IO.FileInfo option, connString: string option) =
 
     let tomlFile = defaultArg tomlFile (IO.FileInfo($"sqlhydra-{provider.Id}.toml"))
     
@@ -35,11 +35,11 @@ let main argv =
             |> desc "The database provider id: 'mssql', 'npgsql', 'sqlite', 'mysql', or 'oracle'"
             |> tryParse (fun res ->
                 match res.Tokens[0].Value with
-                | "mssql" ->  Ok SqlServer.Provider.provider
-                | "npgsql" -> Ok Npgsql.Provider.provider
-                | "sqlite" -> Ok Sqlite.Provider.provider
-                | "mysql" ->  Ok MySql.Provider.provider
-                | "oracle" -> Ok Oracle.Provider.provider
+                | "mssql" ->  Ok (SqlServer.Provider.SqlServerProvider() :> ISqlHydraDbProvider)
+                | "npgsql" -> Ok (Npgsql.Provider.NpgsqlProvider() :> ISqlHydraDbProvider)
+                | "sqlite" -> Ok (Sqlite.Provider.SqliteProvider() :> ISqlHydraDbProvider)
+                | "mysql" ->  Ok (MySql.Provider.MySqlProvider() :> ISqlHydraDbProvider)
+                | "oracle" -> Ok (Oracle.Provider.OracleProvider() :> ISqlHydraDbProvider)
                 | providerId -> Error $"Invalid provider id: '{providerId}'. Valid options are: 'mssql', 'npgsql', 'sqlite', 'mysql', or 'oracle'."
             ),
             

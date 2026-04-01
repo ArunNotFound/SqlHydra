@@ -7,7 +7,7 @@ open SqlHydra.Domain
 
 type Args = 
     {
-        Provider: Provider
+        Provider: ISqlHydraDbProvider
         TomlFile: FileInfo
         Project: FileInfo
         Version: Version.InformationalVersion
@@ -139,7 +139,7 @@ let run (args: Args) =
     let generatedCode =
         let isLegacy = Fsproj.targetsLegacyFramework args.Project
         printLegacyStatus isLegacy
-        let schema = args.Provider.GetSchema(cfg, isLegacy)
+        let schema = args.Provider.GetSchema(cfg, isLegacy = isLegacy)
         SchemaTemplate.generate cfg args.Provider schema args.Version
         |> formatCodeWithFantomas
         

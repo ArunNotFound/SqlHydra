@@ -2,25 +2,13 @@
 
 open SqlHydra.Domain
 
-let provider =
-    {
-        Provider.Id = "mssql"
-        Provider.Name = "SqlHydra.SqlServer"
-        Provider.Type = SqlServer
-        Provider.DefaultReaderType = "Microsoft.Data.SqlClient.SqlDataReader"
-        Provider.DefaultProvider = "Microsoft.Data.SqlClient"
-        Provider.GetSchema = SqlServerSchemaProvider.getSchema
-    }
-
 type SqlServerProvider() =
     interface ISqlHydraDbProvider with
-        member _.CreateMappings(isLegacy) = SqlServerDataTypes.typeMappingsByName isLegacy
+        member _.Id = "mssql"
+        member _.Name = "SqlHydra.SqlServer"
+        member _.Type = SqlServer
+        member _.DefaultReaderType = "Microsoft.Data.SqlClient.SqlDataReader"
+        member _.DefaultProvider = "Microsoft.Data.SqlClient"
+        member _.SqlKataCompiler = "SqlKata.Compilers.SqlServerCompiler()"
+        member _.ProviderConnectionType = "Microsoft.Data.SqlClient.SqlConnection"
         member _.GetSchema(cfg, isLegacy) = SqlServerSchemaProvider.getSchema(cfg, isLegacy)
-        member _.ProviderMetadata =
-            {
-                ProviderMetadata.Id = "mssql"
-                ProviderMetadata.Name = "SqlHydra.SqlServer"
-                ProviderMetadata.Type = SqlServer
-                ProviderMetadata.DefaultReaderType = "Microsoft.Data.SqlClient.SqlDataReader"
-                ProviderMetadata.DefaultProvider = "Microsoft.Data.SqlClient"
-            }

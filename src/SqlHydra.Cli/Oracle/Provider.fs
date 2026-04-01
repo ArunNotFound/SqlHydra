@@ -2,25 +2,13 @@
 
 open SqlHydra.Domain
 
-let provider =
-    {
-        Provider.Id = "oracle"
-        Provider.Name = "SqlHydra.Oracle"
-        Provider.Type = Oracle
-        Provider.DefaultReaderType = "Oracle.ManagedDataAccess.Client.OracleDataReader"
-        Provider.DefaultProvider = "Oracle.ManagedDataAccess.Core"
-        Provider.GetSchema = OracleSchemaProvider.getSchema
-    }
-
 type OracleProvider() =
     interface ISqlHydraDbProvider with
-        member _.CreateMappings(_isLegacy) = OracleDataTypes.typeMappingsByName
+        member _.Id = "oracle"
+        member _.Name = "SqlHydra.Oracle"
+        member _.Type = Oracle
+        member _.DefaultReaderType = "Oracle.ManagedDataAccess.Client.OracleDataReader"
+        member _.DefaultProvider = "Oracle.ManagedDataAccess.Core"
+        member _.SqlKataCompiler = "SqlKata.Compilers.OracleCompiler()"
+        member _.ProviderConnectionType = "Oracle.ManagedDataAccess.Client.OracleConnection"
         member _.GetSchema(cfg, isLegacy) = OracleSchemaProvider.getSchema(cfg, isLegacy)
-        member _.ProviderMetadata =
-            {
-                ProviderMetadata.Id = "oracle"
-                ProviderMetadata.Name = "SqlHydra.Oracle"
-                ProviderMetadata.Type = Oracle
-                ProviderMetadata.DefaultReaderType = "Oracle.ManagedDataAccess.Client.OracleDataReader"
-                ProviderMetadata.DefaultProvider = "Oracle.ManagedDataAccess.Core"
-            }

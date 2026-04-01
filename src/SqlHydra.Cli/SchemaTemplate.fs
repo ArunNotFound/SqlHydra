@@ -74,23 +74,7 @@ let mkTable cfg db (table: Table) schema = stringBuffer {
     }
 }
 
-let mkCompiler (providerType: ProviderType) =
-    match providerType with
-    | ProviderType.SqlServer -> "SqlKata.Compilers.SqlServerCompiler()"
-    | ProviderType.Npgsql -> "SqlKata.Compilers.PostgresCompiler()"
-    | ProviderType.MySql -> "SqlKata.Compilers.MySqlCompiler()"
-    | ProviderType.Sqlite -> "SqlKata.Compilers.SqliteCompiler()"
-    | ProviderType.Oracle -> "SqlKata.Compilers.OracleCompiler()"
-
-let mkConnectionType (providerType: ProviderType) =
-    match providerType with
-    | ProviderType.SqlServer -> "Microsoft.Data.SqlClient.SqlConnection"
-    | ProviderType.Npgsql -> "Npgsql.NpgsqlConnection"
-    | ProviderType.MySql -> "MySql.Data.MySqlClient.MySqlConnection"
-    | ProviderType.Sqlite -> "Microsoft.Data.Sqlite.SqliteConnection"
-    | ProviderType.Oracle -> "Oracle.ManagedDataAccess.Client.OracleConnection"
-
-let generate (cfg: Config) (provider: Provider) (db: Schema) (version: Version.InformationalVersion) = stringBuffer {
+let generate (cfg: Config) (provider: ISqlHydraDbProvider) (db: Schema) (version: Version.InformationalVersion) = stringBuffer {
     let filteredTables =
         db.Tables
         |> List.sortBy (fun tbl -> tbl.Schema, tbl.Name)
@@ -148,8 +132,8 @@ type HydraReader =
 
     // If the user configures ProviderDbTypeAttributes, we know they are using SqlHydra.Query.
     if cfg.ProviderDbTypeAttributes then
-        let compiler = mkCompiler provider.Type
-        let connectionType = mkConnectionType provider.Type
+        let compiler = provider.SqlKataCompiler
+        let connectionType = provider.ProviderConnectionType
 
         $"""
 [<System.Obsolete("The HydraBuilders module is no longer needed and will be removed in v4.0.")>]
