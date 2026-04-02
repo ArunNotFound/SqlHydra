@@ -169,6 +169,17 @@ type IExtendTypeMapping =
     inherit ISqlHydraExtension
     abstract member Extend: baseTryFind: (TypeMappingContext -> TypeMapping option) -> (TypeMappingContext -> TypeMapping option)
 
+type NamingContext =
+    {
+        Table: Table
+        Column: Column option
+    }
+
+type IExtendNaming =
+    inherit ISqlHydraExtension
+    abstract member ExtendTableName: baseFn: (NamingContext -> string) -> (NamingContext -> string)
+    abstract member ExtendColumnName: baseFn: (NamingContext -> string) -> (NamingContext -> string)
+
 type ISqlHydraDbProvider =
     abstract member Id: string
     abstract member Name: string

@@ -85,7 +85,7 @@ let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list)
             let supportedColumns =
                 tableSchema.Columns
                 |> List.choose (fun col ->
-                    let ctx = { Table = tableSchema; Column = col }
+                    let ctx = { TypeMappingContext.Table = tableSchema; TypeMappingContext.Column = col }
                     tryFindTypeMapping ctx
                     |> Option.map (fun typeMapping ->
                         {

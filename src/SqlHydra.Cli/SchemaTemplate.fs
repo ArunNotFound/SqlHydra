@@ -28,14 +28,15 @@ let mkEnum db schema enum = stringBuffer {
     }
 }
 
-let mkTable cfg db (table: Table) schema = stringBuffer {
+let mkTable cfg db (table: Table) schema tableName columnName = stringBuffer {
     let tableType =
         db.Tables
         |> List.find (fun t -> t.Schema = schema && t.Name = table.Name)
 
     if cfg.IsCLIMutable then "[<CLIMutable>]"
 
-    $"type {backticks table.Name} ="
+    let tblName = tableName { NamingContext.Table = table; Column = None }
+    $"type {backticks tblName} ="
     indent {
         "{"
         indent {
@@ -68,13 +69,22 @@ let mkTable cfg db (table: Table) schema = stringBuffer {
                         None
 
                 if providerDbTypeAttribute.IsSome then providerDbTypeAttribute.Value
-                $"""{if cfg.IsMutableProperties then "mutable " else ""}{backticks col.Name}: {columnPropertyType}"""
+                let colName = columnName { NamingContext.Table = table; Column = Some col }
+                $"""{if cfg.IsMutableProperties then "mutable " else ""}{backticks colName}: {columnPropertyType}"""
         }
         "}"
     }
 }
 
-let generate (cfg: Config) (provider: ISqlHydraDbProvider) (db: Schema) (version: Version.InformationalVersion) = stringBuffer {
+let generate (cfg: Config) (provider: ISqlHydraDbProvider) (db: Schema) (version: Version.InformationalVersion) (namingExtensions: IExtendNaming list) = stringBuffer {
+    let tableName =
+        let baseFn (ctx: NamingContext) = ctx.Table.Name
+        namingExtensions |> List.fold (fun acc ext -> ext.ExtendTableName acc) baseFn
+
+    let columnName =
+        let baseFn (ctx: NamingContext) = ctx.Column.Value.Name
+        namingExtensions |> List.fold (fun acc ext -> ext.ExtendColumnName acc) baseFn
+
     let filteredTables =
         db.Tables
         |> List.sortBy (fun tbl -> tbl.Schema, tbl.Name)
@@ -114,11 +124,12 @@ namespace {{cfg.Namespace}}
 
         indent {
             for table in tables do
-                mkTable cfg db table schema
+                mkTable cfg db table schema tableName columnName
                 newLine
 
                 if cfg.TableDeclarations then
-                    $"let {backticks table.Name} = table<{backticks table.Name}>"
+                    let tblName = tableName { NamingContext.Table = table; Column = None }
+                    $"let {backticks tblName} = table<{backticks tblName}>"
                     newLine
         }
 

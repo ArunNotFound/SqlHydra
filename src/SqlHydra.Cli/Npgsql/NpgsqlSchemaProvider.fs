@@ -223,7 +223,7 @@ let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list)
             let mappedColumns =
                 matViewCols
                 |> List.choose (fun col ->
-                    let ctx = { Table = tableSchema; Column = col }
+                    let ctx = { TypeMappingContext.Table = tableSchema; TypeMappingContext.Column = col }
                     tryFindTypeMapping ctx
                     |> Option.map (fun typeMapping ->
                         {
@@ -280,7 +280,7 @@ let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list)
             let mappedColumns =
                 tableCols
                 |> List.choose (fun col ->
-                    let ctx = { Table = tableSchema; Column = col }
+                    let ctx = { TypeMappingContext.Table = tableSchema; TypeMappingContext.Column = col }
                     tryFindTypeMapping ctx
                     |> Option.map (fun typeMapping ->
                         {
