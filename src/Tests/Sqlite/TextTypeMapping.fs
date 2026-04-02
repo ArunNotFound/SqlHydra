@@ -9,15 +9,15 @@ type Text = string
 type TextTypeMapping() =
     interface IExtendTypeMapping with
         member _.Extend(baseTryFind) =
-            fun typeName ->
-                match typeName.Trim().ToLower() with
+            fun (ctx: TypeMappingContext) ->
+                match ctx.Column.ProviderTypeName.Trim().ToLower() with
                 | "text"
                 | "string" ->
                     Some {
-                        TypeMapping.ColumnTypeAlias = typeName
+                        TypeMapping.ColumnTypeAlias = ctx.Column.ProviderTypeName
                         TypeMapping.ClrType = "Sqlite.CustomTypes.Text"
                         TypeMapping.DbType = System.Data.DbType.String
                         TypeMapping.ProviderDbType = None
                     }
-                | _ -> 
-                    baseTryFind typeName
+                | _ ->
+                    baseTryFind ctx

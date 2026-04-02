@@ -91,5 +91,6 @@ let adjustForPrecisionScale (mapping: TypeMapping) (precisionMaybe: int option) 
     | _ ->
         mapping
 
-let tryFindTypeMapping (providerTypeName: string) =
-    typeMappingsByName.TryFind (providerTypeName.ToUpper())
+let tryFindTypeMapping (ctx: TypeMappingContext) =
+    typeMappingsByName.TryFind (ctx.Column.ProviderTypeName.ToUpper())
+    |> Option.map (fun m -> adjustForPrecisionScale m ctx.Column.Precision ctx.Column.Scale)

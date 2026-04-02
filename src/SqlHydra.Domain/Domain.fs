@@ -132,11 +132,42 @@ type ProviderType =
     | Oracle
     | Custom of string
 
+type ColumnSchema =
+    {
+        Catalog: string
+        Schema: string
+        Table: string
+        Name: string
+        ProviderTypeName: string
+        IsNullable: bool
+        Ordinal: int
+        Precision: int option
+        Scale: int option
+        IsPrimaryKey: bool
+        IsComputed: bool
+        DefaultValue: string option
+    }
+
+type TableSchema =
+    {
+        Catalog: string
+        Schema: string
+        Name: string
+        Type: TableType
+        Columns: ColumnSchema list
+    }
+
 type ISqlHydraExtension = interface end
+
+type TypeMappingContext =
+    {
+        Table: TableSchema
+        Column: ColumnSchema
+    }
 
 type IExtendTypeMapping =
     inherit ISqlHydraExtension
-    abstract member Extend: baseTryFind: (string -> TypeMapping option) -> (string -> TypeMapping option)
+    abstract member Extend: baseTryFind: (TypeMappingContext -> TypeMapping option) -> (TypeMappingContext -> TypeMapping option)
 
 type ISqlHydraDbProvider =
     abstract member Id: string
