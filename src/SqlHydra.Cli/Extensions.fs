@@ -46,18 +46,38 @@ let private discoverExtensions (asm: Assembly) =
     |> Array.map (fun t -> Activator.CreateInstance(t) :?> IExtendTypeMapping)
     |> Array.toList
 
-/// Resolves extension assemblies and loads IExtendTypeMapping implementations.
-let load (project: FileInfo) (extensionNames: string list) : IExtendTypeMapping list =
-    if extensionNames.IsEmpty then [] else
+/// Loads an assembly from a DLL path and discovers IExtendTypeMapping implementations.
+let private loadFromAssembly (dllPath: string) =
+    let fullPath = Path.GetFullPath(dllPath)
+    let loadContext = ExtensionLoadContext(fullPath)
+    let asm = loadContext.LoadFromAssemblyPath(fullPath)
+    discoverExtensions asm
 
+/// Finds a DLL by name in the project's bin/ directory.
+let private findDll (project: FileInfo) (dllName: string) =
+    let binDir = Path.Combine(project.Directory.FullName, "bin")
+    if Directory.Exists(binDir) then
+        Directory.EnumerateFiles(binDir, dllName, SearchOption.AllDirectories)
+        |> Seq.tryHead
+    else
+        None
+
+/// Loads IExtendTypeMapping extensions.
+/// Always auto-scans the target project's own assembly first.
+/// Then loads any additional assemblies listed in the TOML [extensions] config.
+let load (project: FileInfo) (extensionNames: string list) : IExtendTypeMapping list =
     let projectName = Path.GetFileNameWithoutExtension(project.Name)
 
-    extensionNames
-    |> List.collect (fun extName ->
-        // If the extension name matches the target project itself, scan its output assembly
-        let isOwnProject = String.Equals(extName, projectName, StringComparison.OrdinalIgnoreCase)
+    // Auto-scan the target project's own assembly
+    let projectExtensions =
+        match findDll project $"{projectName}.dll" with
+        | Some path -> loadFromAssembly path
+        | None -> []
 
-        if not isOwnProject then
+    // Load additional extensions from TOML config
+    let configExtensions =
+        extensionNames
+        |> List.collect (fun extName ->
             // Verify the extension is referenced by the project
             let root = ProjectRootElement.Open(project.FullName)
             let hasRef =
@@ -72,24 +92,12 @@ let load (project: FileInfo) (extensionNames: string list) : IExtendTypeMapping 
             if not hasRef then
                 failwith $"Extension '{extName}' was not found as a PackageReference or ProjectReference in '{project.Name}'."
 
-        // Search the project's output directories for the extension assembly
-        let projectDir = project.Directory.FullName
-        let dllName = $"{extName}.dll"
-        let binDir = Path.Combine(projectDir, "bin")
+            let dllName = $"{extName}.dll"
+            match findDll project dllName with
+            | None ->
+                failwith $"Could not find '{dllName}' in the build output of '{project.Name}'. Ensure the project has been built."
+            | Some path ->
+                loadFromAssembly path
+        )
 
-        if not (Directory.Exists(binDir)) then
-            failwith $"Could not find '{dllName}' in the build output of '{project.Name}'. Ensure the project has been built."
-
-        let dllPath =
-            Directory.EnumerateFiles(binDir, dllName, SearchOption.AllDirectories)
-            |> Seq.tryHead
-
-        match dllPath with
-        | None ->
-            failwith $"Could not find '{dllName}' in the build output of '{project.Name}'. Ensure the project has been built."
-        | Some path ->
-            let fullPath = Path.GetFullPath(path)
-            let loadContext = ExtensionLoadContext(fullPath)
-            let asm = loadContext.LoadFromAssemblyPath(fullPath)
-            discoverExtensions asm
-    )
+    projectExtensions @ configExtensions

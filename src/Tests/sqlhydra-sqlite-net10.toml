@@ -8,9 +8,6 @@ provider_db_type_attributes = true
 table_declarations = true
 [readers]
 reader_type = "System.Data.Common.DbDataReader"
-[extensions]
-type_mappings = [ "Tests" ]
-
 [filters]
 include = [ "*" ]
 exclude = [ "hr/*" ]

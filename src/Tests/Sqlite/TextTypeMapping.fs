@@ -19,4 +19,5 @@ type TextTypeMapping() =
                         TypeMapping.DbType = System.Data.DbType.String
                         TypeMapping.ProviderDbType = None
                     }
-                | _ -> baseTryFind typeName
+                | _ -> 
+                    baseTryFind typeName
