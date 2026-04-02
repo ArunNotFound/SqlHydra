@@ -132,7 +132,10 @@ type ProviderType =
     | Oracle
     | Custom of string
 
+type ISqlHydraExtension = interface end
+
 type IExtendTypeMapping =
+    inherit ISqlHydraExtension
     abstract member Extend: baseTryFind: (string -> TypeMapping option) -> (string -> TypeMapping option)
 
 type ISqlHydraDbProvider =

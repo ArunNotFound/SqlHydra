@@ -5,7 +5,7 @@ open System.IO
 open Spectre.Console
 open SqlHydra.Domain
 
-type Args = 
+type Args =
     {
         Provider: ISqlHydraDbProvider
         TomlFile: FileInfo
@@ -137,11 +137,17 @@ let run (args: Args) =
     // Ensure the output directory exists (`cfg.OutputFile` may contain subdirectories).
     outputFile.Directory.Create()
 
+    // Load extensions: auto-scan the target project + any TOML-configured external extensions
+    let extensions =
+        let projectExts = Extensions.scanProject args.Project
+        let namedExts = Extensions.loadNamed args.Project cfg.TypeMappingExtensions
+        projectExts @ namedExts
+
     let generatedCode =
         let isLegacy = Fsproj.targetsLegacyFramework args.Project
         printLegacyStatus isLegacy
-        let extensions = Extensions.load args.Project cfg.TypeMappingExtensions
-        let schema = args.Provider.GetSchema(cfg, isLegacy, extensions)
+        let typeMappingExts = extensions |> Extensions.ofType<IExtendTypeMapping>
+        let schema = args.Provider.GetSchema(cfg, isLegacy, typeMappingExts)
         SchemaTemplate.generate cfg args.Provider schema args.Version
         |> formatCodeWithFantomas
         
