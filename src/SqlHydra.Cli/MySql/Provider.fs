@@ -11,5 +11,5 @@ let instance: ISqlHydraDbProvider =
         member _.DefaultProvider = "MySql.Data"
         member _.SqlKataCompiler = "SqlKata.Compilers.MySqlCompiler()"
         member _.ProviderConnectionType = "MySql.Data.MySqlClient.MySqlConnection"
-        member _.GetSchema(cfg, isLegacy) = MySqlSchemaProvider.getSchema(cfg, isLegacy)
+        member _.GetSchema(cfg, isLegacy, extensions) = MySqlSchemaProvider.getSchema(cfg, isLegacy, extensions)
     }

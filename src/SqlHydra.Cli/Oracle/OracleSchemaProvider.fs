@@ -18,7 +18,7 @@ let getColumnSchema (conn: OracleConnection) =
     adapter.Fill(dataTable) |> ignore
     dataTable
 
-let getSchema (cfg: Config, isLegacy: bool) : Schema =
+let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list) : Schema =
     use conn = new OracleConnection(cfg.ConnectionString)
     conn.Open()
     let sTables = conn.GetSchema("Tables", cfg.Filters.TryGetRestrictionsByKey("Tables"))
@@ -116,12 +116,17 @@ let getSchema (cfg: Config, isLegacy: bool) : Schema =
                     col.TableName = tbl.Name
                 )                
                 
-            let supportedColumns = 
-                tableColumns                
-                |> Seq.choose (fun col -> 
-                    OracleDataTypes.tryFindTypeMapping (col.ProviderTypeName, col.Precision, col.Scale)
+            let tryFindTypeMapping =
+                let baseTryFind = OracleDataTypes.tryFindTypeMapping
+                extensions |> List.fold (fun acc (ext: IExtendTypeMapping) -> ext.Extend(acc)) baseTryFind
+
+            let supportedColumns =
+                tableColumns
+                |> Seq.choose (fun col ->
+                    tryFindTypeMapping col.ProviderTypeName
+                    |> Option.map (fun m -> OracleDataTypes.adjustForPrecisionScale m col.Precision col.Scale)
                     |> Option.map (fun typeMapping ->
-                        { 
+                        {
                             Column.Name = col.ColumnName
                             Column.IsNullable = col.IsNullable
                             Column.TypeMapping = typeMapping

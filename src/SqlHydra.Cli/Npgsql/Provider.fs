@@ -11,5 +11,5 @@ let instance: ISqlHydraDbProvider =
         member _.DefaultProvider = "Npgsql"
         member _.SqlKataCompiler = "SqlKata.Compilers.PostgresCompiler()"
         member _.ProviderConnectionType = "Npgsql.NpgsqlConnection"
-        member _.GetSchema(cfg, isLegacy) = NpgsqlSchemaProvider.getSchema(cfg, isLegacy)
+        member _.GetSchema(cfg, isLegacy, extensions) = NpgsqlSchemaProvider.getSchema(cfg, isLegacy, extensions)
     }

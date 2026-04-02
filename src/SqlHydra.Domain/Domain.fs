@@ -114,6 +114,9 @@ type Config =
         
         /// Filters: optional filters for schemas, tables and columns
         Filters: Filters
+
+        /// Extensions: type mapping extension assembly names
+        TypeMappingExtensions: string list
     }
 
 and [<RequireQualifiedAccess>] 
@@ -129,6 +132,9 @@ type ProviderType =
     | Oracle
     | Custom of string
 
+type IExtendTypeMapping =
+    abstract member Extend: baseTryFind: (string -> TypeMapping option) -> (string -> TypeMapping option)
+
 type ISqlHydraDbProvider =
     abstract member Id: string
     abstract member Name: string
@@ -137,4 +143,4 @@ type ISqlHydraDbProvider =
     abstract member DefaultProvider: string
     abstract member SqlKataCompiler: string
     abstract member ProviderConnectionType: string
-    abstract member GetSchema: cfg: Config * isLegacy: bool -> Schema
+    abstract member GetSchema: cfg: Config * isLegacy: bool * extensions: IExtendTypeMapping list -> Schema

@@ -11,5 +11,5 @@ let instance: ISqlHydraDbProvider =
         member _.DefaultProvider = "Oracle.ManagedDataAccess.Core"
         member _.SqlKataCompiler = "SqlKata.Compilers.OracleCompiler()"
         member _.ProviderConnectionType = "Oracle.ManagedDataAccess.Client.OracleConnection"
-        member _.GetSchema(cfg, isLegacy) = OracleSchemaProvider.getSchema(cfg, isLegacy)
+        member _.GetSchema(cfg, isLegacy, extensions) = OracleSchemaProvider.getSchema(cfg, isLegacy, extensions)
     }

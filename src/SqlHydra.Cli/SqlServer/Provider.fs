@@ -11,5 +11,5 @@ let instance: ISqlHydraDbProvider =
         member _.DefaultProvider = "Microsoft.Data.SqlClient"
         member _.SqlKataCompiler = "SqlKata.Compilers.SqlServerCompiler()"
         member _.ProviderConnectionType = "Microsoft.Data.SqlClient.SqlConnection"
-        member _.GetSchema(cfg, isLegacy) = SqlServerSchemaProvider.getSchema(cfg, isLegacy)
+        member _.GetSchema(cfg, isLegacy, extensions) = SqlServerSchemaProvider.getSchema(cfg, isLegacy, extensions)
     }

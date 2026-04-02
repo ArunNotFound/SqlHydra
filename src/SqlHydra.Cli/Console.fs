@@ -51,6 +51,7 @@ let newConfigWizard (args: Args) =
             Config.TableDeclarations = true
             Config.Readers = None
             Config.Filters = Filters.Empty // User must manually configure filter in .toml file
+            Config.TypeMappingExtensions = []
         }
 
     AnsiConsole.MarkupLine($"[green]-[/] {args.TomlFile.Name} has been created!")
@@ -139,11 +140,11 @@ let run (args: Args) =
     let generatedCode =
         let isLegacy = Fsproj.targetsLegacyFramework args.Project
         printLegacyStatus isLegacy
-        let schema = args.Provider.GetSchema(cfg, isLegacy = isLegacy)
+        let extensions = Extensions.load args.Project cfg.TypeMappingExtensions
+        let schema = args.Provider.GetSchema(cfg, isLegacy, extensions)
         SchemaTemplate.generate cfg args.Provider schema args.Version
         |> formatCodeWithFantomas
         
-
     File.WriteAllText(outputFile.FullName, generatedCode)
     Fsproj.addFileToProject args.Project cfg
     AnsiConsole.WriteLine()

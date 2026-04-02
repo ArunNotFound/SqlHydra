@@ -24,6 +24,7 @@ let read(toml: string) =
     let generalTable = model.Get<TomlTable> "general"
     let readersTableMaybe = model.TryGet<TomlTable> "readers"
     let filtersTableMaybe = model.TryGet<TomlTable> "filters"
+    let extensionsTableMaybe = model.TryGet<TomlTable> "extensions"
     let queryIntegrationTableMaybe = model.TryGet<TomlTable> "sqlhydra_query_integration"
 
     {
@@ -59,7 +60,14 @@ let read(toml: string) =
                     ReadersConfig.ReaderType = rdrsTbl.Get<string> "reader_type"
                 }
             )
-        Config.Filters = 
+        Config.TypeMappingExtensions =
+            match extensionsTableMaybe with
+            | Some extTable ->
+                extTable.TryGet "type_mappings"
+                |> Option.map (Seq.cast<string> >> Seq.toList)
+                |> Option.defaultValue []
+            | None -> []
+        Config.Filters =
             match filtersTableMaybe with
             | Some filtersTable -> 
                 {
@@ -104,6 +112,11 @@ let save(cfg: Config) =
         let readers = TableSyntax("readers")
         readers.Items.Add("reader_type", readersConfig.ReaderType)
         doc.Tables.Add(readers))
+
+    if cfg.TypeMappingExtensions <> [] then
+        let extensions = TableSyntax("extensions")
+        extensions.Items.Add("type_mappings", cfg.TypeMappingExtensions |> List.toArray)
+        doc.Tables.Add(extensions)
 
     let filters = TableSyntax("filters")
     filters.Items.Add("include", cfg.Filters.Includes |> List.toArray)

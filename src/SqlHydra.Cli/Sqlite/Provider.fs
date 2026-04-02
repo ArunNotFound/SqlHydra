@@ -11,5 +11,5 @@ let instance: ISqlHydraDbProvider =
         member _.DefaultProvider = "System.Data.SQLite"
         member _.SqlKataCompiler = "SqlKata.Compilers.SqliteCompiler()"
         member _.ProviderConnectionType = "Microsoft.Data.Sqlite.SqliteConnection"
-        member _.GetSchema(cfg, isLegacy) = SqliteSchemaProvider.getSchema(cfg, isLegacy)
+        member _.GetSchema(cfg, isLegacy, extensions) = SqliteSchemaProvider.getSchema(cfg, isLegacy, extensions)
     }

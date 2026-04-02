@@ -5,7 +5,7 @@ open MySql.Data
 open SqlHydra.Domain
 open SqlHydra
 
-let getSchema (cfg: Config, isLegacy: bool) : Schema =
+let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list) : Schema =
     use conn = new MySqlClient.MySqlConnection(cfg.ConnectionString)
     conn.Open()
 
@@ -85,7 +85,9 @@ let getSchema (cfg: Config, isLegacy: bool) : Schema =
                 )
 
             let supportedColumns = 
-                let tryFindTypeMapping = MySqlDataTypes.tryFindTypeMapping isLegacy
+                let tryFindTypeMapping =
+                    let baseTryFind = MySqlDataTypes.tryFindTypeMapping isLegacy
+                    extensions |> List.fold (fun acc (ext: IExtendTypeMapping) -> ext.Extend(acc)) baseTryFind
                 tableColumns
                 |> Seq.choose (fun col -> 
                     tryFindTypeMapping col.ProviderTypeName

@@ -10,7 +10,7 @@ let dbNullOpt<'T> (o: obj) : 'T option =
     | :? System.DBNull -> None
     | _ -> o :?> 'T |> Some
 
-let getSchema (cfg: Config, isLegacy: bool) : Schema = 
+let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list) : Schema =
     use conn = new SQLiteConnection(cfg.ConnectionString)
     conn.Open()
     let sTables = conn.GetSchema("Tables", cfg.Filters.TryGetRestrictionsByKey("Tables"))
@@ -60,7 +60,9 @@ let getSchema (cfg: Config, isLegacy: bool) : Schema =
                 )
 
             let supportedColumns = 
-                let tryFindTypeMapping = SqliteDataTypes.tryFindTypeMapping isLegacy
+                let tryFindTypeMapping =
+                    let baseTryFind = SqliteDataTypes.tryFindTypeMapping isLegacy
+                    extensions |> List.fold (fun acc (ext: IExtendTypeMapping) -> ext.Extend(acc)) baseTryFind
                 tableColumns
                 |> Seq.choose (fun col -> 
                     tryFindTypeMapping col.ProviderTypeName

@@ -25,6 +25,7 @@ let ``Save: All``() =
             TableDeclarations = true
             Readers = Some { ReadersConfig.ReaderType = "Microsoft.Data.SqlClient.SqlDataReader" }
             Filters = Filters.Empty
+            TypeMappingExtensions = []
         }
 
     let toml = TomlConfigParser.save(cfg)
@@ -73,6 +74,7 @@ let ``Read: with no filters``() =
             TableDeclarations = false
             Readers = Some { ReadersConfig.ReaderType = "Microsoft.Data.SqlClient.SqlDataReader" }
             Filters = Filters.Empty
+            TypeMappingExtensions = []
         }
 
     let cfg = TomlConfigParser.read(toml)
@@ -102,6 +104,7 @@ let ``Read: when no readers section should be None``() =
             TableDeclarations = false
             Readers = None
             Filters = Filters.Empty
+            TypeMappingExtensions = []
         }
 
     let cfg = TomlConfigParser.read(toml)

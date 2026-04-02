@@ -5,7 +5,7 @@ open Microsoft.Data.SqlClient
 open SqlHydra.Domain
 open SqlHydra
 
-let getSchema (cfg: Config, isLegacy: bool) : Schema = 
+let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list) : Schema =
     use conn = new SqlConnection(cfg.ConnectionString)
     conn.Open()
     
@@ -76,7 +76,9 @@ let getSchema (cfg: Config, isLegacy: bool) : Schema =
                 )
 
             let supportedColumns = 
-                let tryFindTypeMapping = SqlServerDataTypes.tryFindTypeMapping isLegacy
+                let tryFindTypeMapping =
+                    let baseTryFind = SqlServerDataTypes.tryFindTypeMapping isLegacy
+                    extensions |> List.fold (fun acc (ext: IExtendTypeMapping) -> ext.Extend(acc)) baseTryFind
                 tableColumns
                 |> Seq.choose (fun col -> 
                     tryFindTypeMapping col.ProviderTypeName
