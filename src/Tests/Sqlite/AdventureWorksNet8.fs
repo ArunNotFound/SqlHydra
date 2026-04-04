@@ -20,7 +20,7 @@ module main =
           StateProvince: Sqlite.CustomTypes.Text
           CountryRegion: Sqlite.CustomTypes.Text
           PostalCode: Sqlite.CustomTypes.Text
-          RowGuid: Sqlite.CustomTypes.Text
+          rowguid: Sqlite.CustomTypes.Text
           ModifiedDate: System.DateTime }
 
     let Address = table<Address>
@@ -49,7 +49,7 @@ module main =
           Phone: Option<Sqlite.CustomTypes.Text>
           PasswordHash: Sqlite.CustomTypes.Text
           PasswordSalt: Sqlite.CustomTypes.Text
-          RowGuid: Sqlite.CustomTypes.Text
+          rowguid: Sqlite.CustomTypes.Text
           ModifiedDate: System.DateTime }
 
     let Customer = table<Customer>
@@ -59,7 +59,7 @@ module main =
         { CustomerID: int64
           AddressID: int64
           AddressType: Sqlite.CustomTypes.Text
-          RowGuid: Sqlite.CustomTypes.Text
+          rowguid: Sqlite.CustomTypes.Text
           ModifiedDate: System.DateTime }
 
     let CustomerAddress = table<CustomerAddress>
@@ -95,7 +95,7 @@ module main =
           DiscontinuedDate: Option<System.DateTime>
           ThumbNailPhoto: Option<byte[]>
           ThumbnailPhotoFileName: Option<Sqlite.CustomTypes.Text>
-          RowGuid: Sqlite.CustomTypes.Text
+          rowguid: Sqlite.CustomTypes.Text
           ModifiedDate: System.DateTime }
 
     let Product = table<Product>
@@ -105,7 +105,7 @@ module main =
         { ProductCategoryID: int64
           ParentProductCategoryID: Option<int64>
           Name: Sqlite.CustomTypes.Text
-          RowGuid: Sqlite.CustomTypes.Text
+          rowguid: Sqlite.CustomTypes.Text
           ModifiedDate: System.DateTime }
 
     let ProductCategory = table<ProductCategory>
@@ -114,7 +114,7 @@ module main =
     type ProductDescription =
         { ProductDescriptionID: int64
           Description: Sqlite.CustomTypes.Text
-          RowGuid: Sqlite.CustomTypes.Text
+          rowguid: Sqlite.CustomTypes.Text
           ModifiedDate: System.DateTime }
 
     let ProductDescription = table<ProductDescription>
@@ -124,7 +124,7 @@ module main =
         { ProductModelID: int64
           Name: Sqlite.CustomTypes.Text
           CatalogDescription: Option<Sqlite.CustomTypes.Text>
-          RowGuid: Sqlite.CustomTypes.Text
+          rowguid: Sqlite.CustomTypes.Text
           ModifiedDate: System.DateTime }
 
     let ProductModel = table<ProductModel>
@@ -134,7 +134,7 @@ module main =
         { ProductModelID: int64
           ProductDescriptionID: int64
           Culture: Sqlite.CustomTypes.Text
-          RowGuid: Sqlite.CustomTypes.Text
+          rowguid: Sqlite.CustomTypes.Text
           ModifiedDate: System.DateTime }
 
     let ProductModelProductDescription = table<ProductModelProductDescription>
@@ -148,7 +148,7 @@ module main =
           UnitPrice: int64
           UnitPriceDiscount: int64
           LineTotal: int64
-          RowGuid: Sqlite.CustomTypes.Text
+          rowguid: Sqlite.CustomTypes.Text
           ModifiedDate: System.DateTime }
 
     let SalesOrderDetail = table<SalesOrderDetail>
@@ -175,7 +175,7 @@ module main =
           Freight: int64
           TotalDue: int64
           Comment: Option<Sqlite.CustomTypes.Text>
-          RowGuid: Sqlite.CustomTypes.Text
+          rowguid: Sqlite.CustomTypes.Text
           ModifiedDate: System.DateTime }
 
     let SalesOrderHeader = table<SalesOrderHeader>

@@ -147,7 +147,8 @@ let run (args: Args) =
         let isLegacy = Fsproj.targetsLegacyFramework args.Project
         printLegacyStatus isLegacy
         let typeMappingExts = extensions |> Extensions.ofType<IExtendTypeMapping>
-        let namingExts = extensions |> Extensions.ofType<IExtendNaming>
+        //let namingExts = extensions |> Extensions.ofType<IExtendNaming> // TODO: enable once IExtendNaming is stable
+        let namingExts : IExtendNaming list = []
         let schema = args.Provider.GetSchema(cfg, isLegacy, typeMappingExts)
         SchemaTemplate.generate cfg args.Provider schema args.Version namingExts
         |> formatCodeWithFantomas

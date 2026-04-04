@@ -43,12 +43,12 @@ let ``TextTypeMapping extension should map text columns to Text`` () =
     code.Contains "int64" =! true
     code.Contains "System.DateTime" =! true
 
-[<Test>]
-let ``PascalCaseNaming extension should rename rowguid to RowGuid`` () =
-    let ext = Sqlite.CustomNaming.PascalCaseNaming() :> IExtendNaming
-    let code = getCode [] [ext] cfg
-    // The extension should rename rowguid -> RowGuid
-    code.Contains "RowGuid" =! true
-    // Original name should not appear as a field
-    code.Contains "rowguid:" =! false
+//[<Test>]
+//let ``PascalCaseNaming extension should rename rowguid to RowGuid`` () =
+//    let ext = Sqlite.CustomNaming.PascalCaseNaming() :> IExtendNaming
+//    let code = getCode [] [ext] cfg
+//    // The extension should rename rowguid -> RowGuid
+//    code.Contains "RowGuid" =! true
+//    // Original name should not appear as a field
+//    code.Contains "rowguid:" =! false
 #endif

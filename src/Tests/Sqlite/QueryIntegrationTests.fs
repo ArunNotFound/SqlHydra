@@ -382,7 +382,7 @@ let ``OnConflictDoUpdate``() = task {
          ; main.Address.StateProvince = "OR"
          ; main.Address.CountryRegion = "United States"
          ; main.Address.PostalCode = "97205"
-         ; main.Address.RowGuid = ""
+         ; main.Address.rowguid = ""
          ; main.Address.ModifiedDate = System.DateTime.Now }
 
     do! upsertAddress newAddress
