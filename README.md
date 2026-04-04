@@ -641,20 +641,6 @@ let completeOrder (db: QueryContextFactory) orderId = task {
 }
 ```
 
-### Custom SqlKata Operations
-
-For operations not directly supported, use the `kata` operation:
-
-```fsharp
-select {
-    for c in main.Customer do
-    where (c.FirstName = "John")
-    kata (fun query ->
-        query.OrderByRaw("LastName COLLATE NOCASE")
-    )
-}
-```
-
 ### Custom SQL with HydraReader
 
 ```fsharp
@@ -858,4 +844,3 @@ Multiple extensions compose in order -- each wraps the previous one. An extensio
 
 - [TOML Configuration Reference](https://github.com/JordanMarr/SqlHydra/wiki/TOML-Configuration)
 - [Using HydraReader with other libraries](https://github.com/JordanMarr/SqlHydra/wiki/DataReaders)
-- [SqlKata Documentation](https://sqlkata.com/)
