@@ -33,9 +33,26 @@ let db = QueryContextFactory.Create(connectionString, printf "SQL: %O")
 //    conn.Open()
 //    conn
 
-let toSql (query: SqlHydra.Query.SelectQuery) = 
-    let compiler = SqlKata.Compilers.SqliteCompiler()
-    let sql = compiler.Compile(query.ToKataQuery()).Sql
+let private emitter = SqlHydra.Query.SqliteEmitter() :> SqlHydra.Query.ISqlEmitter
+
+let toSql (query: SqlHydra.Query.SelectQuery) =
+    let sql = (query.CompileWith(emitter)).Sql
+    #if DEBUG
+    printfn "toSql: %s" sql
+    #endif
+    sql
+
+let toUpdateSql (query: SqlHydra.Query.UpdateQuery<_, _>) =
+    let ir = SqlHydra.Query.KataUtils.fromUpdate query.Spec
+    let sql = (emitter.EmitUpdate(ir)).Sql
+    #if DEBUG
+    printfn "toSql: %s" sql
+    #endif
+    sql
+
+let toInsertSql (query: SqlHydra.Query.InsertQuery<_, _>) =
+    let ir = SqlHydra.Query.KataUtils.fromInsert query.Spec
+    let sql = (emitter.EmitInsert(ir)).Sql
     #if DEBUG
     printfn "toSql: %s" sql
     #endif

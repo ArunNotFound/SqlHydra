@@ -9,7 +9,7 @@ let instance: ISqlHydraDbProvider =
         member _.Type = Sqlite
         member _.DefaultReaderType = "System.Data.Common.DbDataReader"
         member _.DefaultProvider = "System.Data.SQLite"
-        member _.SqlKataCompiler = "SqlKata.Compilers.SqliteCompiler()"
+        member _.SqlEmitter = "SqlHydra.Query.SqliteEmitter()"
         member _.ProviderConnectionType = "Microsoft.Data.Sqlite.SqliteConnection"
         member _.GetSchema(cfg, isLegacy, extensions) = SqliteSchemaProvider.getSchema(cfg, isLegacy, extensions)
     }

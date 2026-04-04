@@ -19,9 +19,26 @@ let server = "localhost,12019"
 let connectionString = $@"Server={server};Database=AdventureWorks;User=sa;Password=Password#123;Connect Timeout=3;TrustServerCertificate=True"
 let db = QueryContextFactory.Create(connectionString, printf "SQL: %O")
 
-let toSql (query: SqlHydra.Query.SelectQuery) = 
-    let compiler = SqlKata.Compilers.SqlServerCompiler()
-    let sql = compiler.Compile(query.ToKataQuery()).Sql
+let private emitter = SqlHydra.Query.SqlServerEmitter() :> SqlHydra.Query.ISqlEmitter
+
+let toSql (query: SqlHydra.Query.SelectQuery) =
+    let sql = (query.CompileWith(emitter)).Sql
+    #if DEBUG
+    printfn "toSql: %s" sql
+    #endif
+    sql
+
+let toUpdateSql (query: SqlHydra.Query.UpdateQuery<_, _>) =
+    let ir = SqlHydra.Query.KataUtils.fromUpdate query.Spec
+    let sql = (emitter.EmitUpdate(ir)).Sql
+    #if DEBUG
+    printfn "toSql: %s" sql
+    #endif
+    sql
+
+let toInsertSql (query: SqlHydra.Query.InsertQuery<_, _>) =
+    let ir = SqlHydra.Query.KataUtils.fromInsert query.Spec
+    let sql = (emitter.EmitInsert(ir)).Sql
     #if DEBUG
     printfn "toSql: %s" sql
     #endif

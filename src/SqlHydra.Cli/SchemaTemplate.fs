@@ -143,7 +143,7 @@ type HydraReader =
 
     // If the user configures ProviderDbTypeAttributes, we know they are using SqlHydra.Query.
     if cfg.ProviderDbTypeAttributes then
-        let compiler = provider.SqlKataCompiler
+        let emitter = provider.SqlEmitter
         let connectionType = provider.ProviderConnectionType
 
         $"""
@@ -163,21 +163,21 @@ type QueryContextFactory =
     static member Create(connectionString: string, ?sqlLogger) =
         QueryContextFactory.Create(Npgsql.NpgsqlDataSource.Create(connectionString), ?sqlLogger = sqlLogger)
     static member Create(dataSource: Npgsql.NpgsqlDataSource, ?sqlLogger) =
-        let compiler = {compiler}
+        let emitter = {emitter}
 
         let createConn () : System.Data.Common.DbConnection =
             dataSource.OpenConnection()
 
         let openContext () =
             let conn = createConn ()
-            let ctx = new QueryContext(conn, compiler)
+            let ctx = new QueryContext(conn, emitter)
             sqlLogger |> Option.iter (fun logger -> ctx.Logger <- logger)
             ctx
 
         let openContextAsync () =
             task {{
                 let! conn = dataSource.OpenConnectionAsync()
-                let ctx = new QueryContext(conn, compiler)
+                let ctx = new QueryContext(conn, emitter)
                 sqlLogger |> Option.iter (fun logger -> ctx.Logger <- logger)
                 return ctx
             }}
@@ -197,7 +197,7 @@ type QueryContextFactory =
     interface IQueryContextFactory with
         member this.OpenContextAsync() = this.OpenContextAsync()
     static member Create(connectionString: string, ?sqlLogger) =
-        let compiler = {compiler}
+        let emitter = {emitter}
 
         let createConn () : System.Data.Common.DbConnection =
             new {connectionType}(connectionString)
@@ -205,7 +205,7 @@ type QueryContextFactory =
         let openContext () =
             let conn = createConn ()
             conn.Open()
-            let ctx = new QueryContext(conn, compiler)
+            let ctx = new QueryContext(conn, emitter)
             sqlLogger |> Option.iter (fun logger -> ctx.Logger <- logger)
             ctx
 
@@ -213,7 +213,7 @@ type QueryContextFactory =
             task {{
                 let conn = createConn ()
                 do! conn.OpenAsync()
-                let ctx = new QueryContext(conn, compiler)
+                let ctx = new QueryContext(conn, emitter)
                 sqlLogger |> Option.iter (fun logger -> ctx.Logger <- logger)
                 return ctx
             }}

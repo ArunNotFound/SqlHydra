@@ -1,4 +1,4 @@
-﻿/// Linq select query builders
+/// Linq select query builders
 [<AutoOpen>]
 module SqlHydra.Query.SelectBuilders
 
@@ -7,7 +7,6 @@ open System.Linq.Expressions
 open System.Data.Common
 open System.Threading
 open System.Threading.Tasks
-open SqlKata
 
 /// The context type that determines how the query context is created and disposed.
 /// Can be implicitly converted from a QueryContext, a function that creates a QueryContext, a Task that creates a QueryContext, or an Async that creates a QueryContext.
@@ -56,27 +55,27 @@ module ContextTypeResolver =
     let inline resolve< ^T when (Resolver or ^T) : (static member ($) : Resolver * ^T -> ContextType)> (input: ^T) : ContextType =
         Resolver $ input
 
-module ContextUtils = 
-    let private tryOpen (ctx: QueryContext) = 
-        if ctx.Connection.State <> Data.ConnectionState.Open 
+module ContextUtils =
+    let private tryOpen (ctx: QueryContext) =
+        if ctx.Connection.State <> Data.ConnectionState.Open
         then ctx.Connection.Open()
         ctx
 
-    let getContext ct : Task<QueryContext> =        
-        match ct with 
-        | Create create ->             
+    let getContext ct : Task<QueryContext> =
+        match ct with
+        | Create create ->
             create() |> tryOpen |> Task.FromResult
-        | CreateTask create -> 
+        | CreateTask create ->
             task {
-                let! ctx = create() 
+                let! ctx = create()
                 return ctx |> tryOpen
             }
-        | CreateAsync create -> 
+        | CreateAsync create ->
             task {
-                let! ctx = create() 
+                let! ctx = create()
                 return ctx |> tryOpen
             }
-        | Shared ctx ->             
+        | Shared ctx ->
             ctx |> tryOpen |> Task.FromResult
 
     let disposeIfNotShared ct (ctx: QueryContext) =
@@ -89,7 +88,7 @@ module ContextUtils =
 
 [<RequireQualifiedAccess>]
 module ResultModifier =
-    type ModifierBase<'T>(qs: QuerySource<'T, Query>) = 
+    type ModifierBase<'T>(qs: QuerySource<'T, SelectQueryIR>) =
         member this.Query = qs.Query
 
     type Count<'T>(qs) = inherit ModifierBase<'T>(qs)
@@ -101,86 +100,73 @@ type SelectBuilder<'Selected, 'Mapped> () =
 
     let getQueryOrDefault (state: QuerySource<'T>) =
         match state with
-        | :? QuerySource<'T, Query> as qs -> qs.Query
-        | _ -> Query()            
+        | :? QuerySource<'T, SelectQueryIR> as qs -> qs.Query
+        | _ -> SelectQueryIR.empty
 
     let mergeTableMappings (a: Map<TableMappingKey, TableMapping>, b: Map<TableMappingKey, TableMapping>) =
         Map (Seq.concat [ (Map.toSeq a); (Map.toSeq b) ])
-            
-    let qualifyColumnWithAlias (alias: string) (col: Reflection.MemberInfo) = 
+
+    let qualifyColumnWithAlias (alias: string) (col: Reflection.MemberInfo) =
         $"%s{alias}.%s{col.Name}"
 
     member val MapFn = Option<Func<'Selected, 'Mapped>>.None with get, set
     member val CancellationToken = CancellationToken.None with get, set
-    
+
     member this.For (state: QuerySource<'T>, [<ReflectedDefinition>] forExpr: FSharp.Quotations.Expr<'T -> QuerySource<'T>>) =
         let tableAlias = QuotationVisitor.visitFor forExpr
-        let query = state |> getQueryOrDefault
+        let ir = state |> getQueryOrDefault
         let tblMaybe, tableMappings = TableMappings.tryGetByRootOrAlias tableAlias state.TableMappings
 
         match tblMaybe with
-        | Some tbl -> 
-            QuerySource<'T, Query>(query.From($"{tbl.Schema}.{tbl.Name} as {tableAlias}"), tableMappings)
-        | None -> 
+        | Some tbl ->
+            QuerySource<'T, SelectQueryIR>({ ir with From = Some $"{tbl.Schema}.{tbl.Name} as {tableAlias}" }, tableMappings)
+        | None ->
             // Handles this scenario: `select (p.FirstName, p.LastName) into (fname, lname)`
-            state :?> QuerySource<'T, Query>
+            state :?> QuerySource<'T, SelectQueryIR>
 
     member this.Yield _ =
         QuerySource<'T>(Map.empty)
 
     // Prevents errors while typing join statement if rest of query is not filled in yet.
-    member this.Zero _ = 
+    member this.Zero _ =
         QuerySource<'T>(Map.empty)
-
-    /// Provides direct access to the underlying SqlKata.Query.
-    [<CustomOperation("kata", MaintainsVariableSpace = true)>]
-    member this.Kata (state: QuerySource<'T, Query>, kata) = 
-        let query = state.Query
-        QuerySource<'T, Query>(query |> kata, state.TableMappings)
 
     /// Sets the WHERE condition
     [<CustomOperation("where", MaintainsVariableSpace = true)>]
-    member this.Where (state: QuerySource<'T, Query>, [<ProjectionParameter>] whereExpression) = 
-        let query = state.Query
+    member this.Where (state: QuerySource<'T, SelectQueryIR>, [<ProjectionParameter>] whereExpression) =
+        let ir = state.Query
         let tableMappings = state.TableMappings |> Map.values
-        let where = LinqExpressionVisitors.visitWhere<'T> tableMappings whereExpression qualifyColumnWithAlias
-        QuerySource<'T, Query>(query.Where(fun w -> where), state.TableMappings)
+        let newClause = LinqExpressionVisitors.visitWhere<'T> tableMappings whereExpression qualifyColumnWithAlias
+        QuerySource<'T, SelectQueryIR>({ ir with Where = WhereClause.combineAnd ir.Where newClause }, state.TableMappings)
 
     /// Sets the SELECT statement and filters the query to include only the selected tables
     [<CustomOperation("select", MaintainsVariableSpace = true, AllowIntoPattern = true)>]
-    member this.Select (state: QuerySource<'T, Query>, [<ProjectionParameter>] selectExpression: Expression<Func<'T, 'Selected>>) =
+    member this.Select (state: QuerySource<'T, SelectQueryIR>, [<ProjectionParameter>] selectExpression: Expression<Func<'T, 'Selected>>) =
         let selections = LinqExpressionVisitors.visitSelect<'T,'Selected> selectExpression
 
-        let queryWithSelectedColumns =
+        let irWithSelectedColumns =
             selections
-            |> List.fold (fun (q: Query) -> function
+            |> List.fold (fun (ir: SelectQueryIR) -> function
                 | LinqExpressionVisitors.SelectedTable (tableAlias, tableType) ->
-                    // Explicitly select all columns in generated table record type.
-                    // This avoids table scans due to 'SELECT *', and avoids potential errors when a table has more columns than expected.
-                    //let props =
-                    //    FSharp.Reflection.FSharpType.GetRecordFields(tableType)
-                    //    |> Array.map (fun p -> $"%s{tableAlias}.%s{p.Name}")
-                    //q.Select(props)
-
                     // Bug fix: temporarily revert to * until option types are properly implemented.
                     // `tableType` was not properly unwrapping option types, causing a runtime error.
                     // For example, left joining a table creates an option type, which should be unwrapped.
-                    q.Select($"%s{tableAlias}.*")
+                    { ir with Select = ir.Select @ [AllColumns tableAlias] }
 
                 | LinqExpressionVisitors.SelectedColumn (tableAlias, column, _, _, _) ->
                     // Select a single column
-                    q.Select($"%s{tableAlias}.%s{column}")
+                    { ir with Select = ir.Select @ [SpecificColumn $"%s{tableAlias}.%s{column}"] }
                 | LinqExpressionVisitors.SelectedExpression sqlFragment ->
-                    q.SelectRaw(sqlFragment)
+                    { ir with Select = ir.Select @ [RawColumn sqlFragment] }
             ) state.Query
 
-        QuerySource<'Selected, Query>(queryWithSelectedColumns, state.TableMappings)
+        QuerySource<'Selected, SelectQueryIR>(irWithSelectedColumns, state.TableMappings)
 
     /// Future v4.0 enhancement.
     /// Sets the SELECT statement using an arbitrary F# expression.
     /// Supports string interpolation, conditionals, and other F# expressions that reference DB columns.
     //[<CustomOperation("select", MaintainsVariableSpace = true, AllowIntoPattern = true)>]
-    //member this.SelectExpr (state: QuerySource<'T, Query>, [<ProjectionParameter>] selectExpression: Expression<Func<'T, 'Selected>>) =
+    //member this.SelectExpr (state: QuerySource<'T, SelectQueryIR>, [<ProjectionParameter>] selectExpression: Expression<Func<'T, 'Selected>>) =
     //    let exprInfo = SelectExprVisitors.visitSelectExpr<'T, 'Selected> selectExpression
 
     //    // Collect aliases that have a TableLeaf (full record); suppress individual ColumnLeafs for those aliases
@@ -191,160 +177,166 @@ type SelectBuilder<'Selected, 'Mapped> () =
     //            | _ -> None)
     //        |> Set.ofList
 
-    //    let queryWithSelectedColumns =
+    //    let irWithSelectedColumns =
     //        exprInfo.Leaves
-    //        |> List.fold (fun (q: Query) leaf ->
+    //        |> List.fold (fun (ir: SelectQueryIR) leaf ->
     //            match leaf with
-    //            | SelectExprVisitors.TableLeaf (tableAlias, _, _) -> q.Select($"%s{tableAlias}.*")
-    //            | SelectExprVisitors.ColumnLeaf (tableAlias, _, _, _, _, _) when tableLeafAliases.Contains(tableAlias) -> q // Suppressed by TableLeaf
-    //            | SelectExprVisitors.ColumnLeaf (tableAlias, column, _, _, _, _) -> q.Select($"%s{tableAlias}.%s{column}")
-    //            | SelectExprVisitors.SqlExprLeaf (sqlFragment, _, alias, _) -> q.SelectRaw($"{sqlFragment} AS {alias}")
+    //            | SelectExprVisitors.TableLeaf (tableAlias, _, _) -> { ir with Select = ir.Select @ [AllColumns tableAlias] }
+    //            | SelectExprVisitors.ColumnLeaf (tableAlias, _, _, _, _, _) when tableLeafAliases.Contains(tableAlias) -> ir // Suppressed by TableLeaf
+    //            | SelectExprVisitors.ColumnLeaf (tableAlias, column, _, _, _, _) -> { ir with Select = ir.Select @ [SpecificColumn $"%s{tableAlias}.%s{column}"] }
+    //            | SelectExprVisitors.SqlExprLeaf (sqlFragment, _, alias, _) -> { ir with Select = ir.Select @ [RawColumn $"{sqlFragment} AS {alias}"] }
     //        ) state.Query
 
-    //    SelectExprVisitors.SelectExprStore.set queryWithSelectedColumns exprInfo
-    //    QuerySource<'Selected, Query>(queryWithSelectedColumns, state.TableMappings)
+    //    SelectExprVisitors.SelectExprStore.set (box irWithSelectedColumns) exprInfo
+    //    QuerySource<'Selected, SelectQueryIR>(irWithSelectedColumns, state.TableMappings)
 
     /// Sets the ORDER BY for single column
     [<CustomOperation("orderBy", MaintainsVariableSpace = true)>]
-    member this.OrderBy (state: QuerySource<'T, Query>, [<ProjectionParameter>] propertySelector) =
-        let orderedQuery =
+    member this.OrderBy (state: QuerySource<'T, SelectQueryIR>, [<ProjectionParameter>] propertySelector) =
+        let ir = state.Query
+        let newOrderBy =
             LinqExpressionVisitors.visitOrderByPropertySelector<'T, 'Prop> propertySelector
             |> function
                 | LinqExpressionVisitors.OrderByColumn (tableAlias, p) ->
                     let fqCol = $"%s{tableAlias}.%s{p.Name}"
-                    state.Query.OrderBy(fqCol)
+                    [OrderByColumn (fqCol, Asc)]
                 | LinqExpressionVisitors.OrderByAggregateColumn (aggType, tableAlias, p) ->
                     let fqCol = $"[%s{tableAlias}].[%s{p.Name}]"
-                    state.Query.OrderByRaw($"%s{aggType}(%s{fqCol})")
+                    [OrderByRaw $"%s{aggType}(%s{fqCol})"]
                 | LinqExpressionVisitors.OrderByIgnored ->
-                    state.Query
-        QuerySource<'T, Query>(orderedQuery, state.TableMappings)
+                    []
+        QuerySource<'T, SelectQueryIR>({ ir with OrderBy = ir.OrderBy @ newOrderBy }, state.TableMappings)
 
     /// Sets the ORDER BY for single column
     [<CustomOperation("thenBy", MaintainsVariableSpace = true)>]
-    member this.ThenBy (state: QuerySource<'T, Query>, [<ProjectionParameter>] propertySelector) = 
+    member this.ThenBy (state: QuerySource<'T, SelectQueryIR>, [<ProjectionParameter>] propertySelector) =
         this.OrderBy(state, propertySelector)
 
     /// Sets the ORDER BY DESC for single column
     [<CustomOperation("orderByDescending", MaintainsVariableSpace = true)>]
-    member this.OrderByDescending (state: QuerySource<'T, Query>, [<ProjectionParameter>] propertySelector) =
-        let orderedQuery =
+    member this.OrderByDescending (state: QuerySource<'T, SelectQueryIR>, [<ProjectionParameter>] propertySelector) =
+        let ir = state.Query
+        let newOrderBy =
             LinqExpressionVisitors.visitOrderByPropertySelector<'T, 'Prop> propertySelector
             |> function
                 | LinqExpressionVisitors.OrderByColumn (tableAlias, p) ->
                     let fqCol = $"%s{tableAlias}.%s{p.Name}"
-                    state.Query.OrderByDesc(fqCol)
+                    [OrderByColumn (fqCol, Desc)]
                 | LinqExpressionVisitors.OrderByAggregateColumn (aggType, tableAlias, p) ->
                     let fqCol = $"[%s{tableAlias}].[%s{p.Name}]"
-                    state.Query.OrderByRaw($"%s{aggType}(%s{fqCol}) DESC")
+                    [OrderByRaw $"%s{aggType}(%s{fqCol}) DESC"]
                 | LinqExpressionVisitors.OrderByIgnored ->
-                    state.Query
-        QuerySource<'T, Query>(orderedQuery, state.TableMappings)
+                    []
+        QuerySource<'T, SelectQueryIR>({ ir with OrderBy = ir.OrderBy @ newOrderBy }, state.TableMappings)
 
     /// Sets the ORDER BY DESC for single column
     [<CustomOperation("thenByDescending", MaintainsVariableSpace = true)>]
-    member this.ThenByDescending (state: QuerySource<'T, Query>, [<ProjectionParameter>] propertySelector) = 
+    member this.ThenByDescending (state: QuerySource<'T, SelectQueryIR>, [<ProjectionParameter>] propertySelector) =
         this.OrderByDescending(state, propertySelector)
 
     /// Sets the SKIP value for query
     [<CustomOperation("skip", MaintainsVariableSpace = true)>]
-    member this.Skip (state: QuerySource<'T, Query>, skip) = 
-        QuerySource<'T, Query>(state.Query.Skip(skip), state.TableMappings)
-    
+    member this.Skip (state: QuerySource<'T, SelectQueryIR>, skip) =
+        QuerySource<'T, SelectQueryIR>({ state.Query with Skip = Some skip }, state.TableMappings)
+
     /// Sets the TAKE value for query
     [<CustomOperation("take", MaintainsVariableSpace = true)>]
-    member this.Take (state: QuerySource<'T, Query>, take) =
-        QuerySource<'T, Query>(state.Query.Take(take), state.TableMappings)
+    member this.Take (state: QuerySource<'T, SelectQueryIR>, take) =
+        QuerySource<'T, SelectQueryIR>({ state.Query with Take = Some take }, state.TableMappings)
 
     /// INNER JOIN table on one or more columns
     [<CustomOperation("join", MaintainsVariableSpace = true, IsLikeJoin = true, JoinConditionWord = "on")>]
-    member this.Join (outerSource: QuerySource<'Outer>, 
-                      innerSource: QuerySource<'Inner>, 
-                      outerKeySelector: Expression<Func<'Outer,'Key>>, 
-                      innerKeySelector: Expression<Func<'Inner,'Key>>, 
-                      resultSelector: Expression<Func<'Outer,'Inner,'JoinResult>> ) = 
+    member this.Join (outerSource: QuerySource<'Outer>,
+                      innerSource: QuerySource<'Inner>,
+                      outerKeySelector: Expression<Func<'Outer,'Key>>,
+                      innerKeySelector: Expression<Func<'Inner,'Key>>,
+                      resultSelector: Expression<Func<'Outer,'Inner,'JoinResult>> ) =
 
         let outerProperties = LinqExpressionVisitors.visitJoin<'Outer, 'Key> outerKeySelector // left
         let innerProperties = LinqExpressionVisitors.visitJoin<'Inner, 'Key> innerKeySelector // right
 
-        let mergedTables = 
+        let mergedTables =
             // Update outer table mappings with join aliases (accumulated outer/left mappings)
-            let outerTableMappings = 
+            let outerTableMappings =
                 outerProperties
-                |> List.fold (fun (mappings: Map<TableMappingKey, TableMapping>) joinPI -> 
+                |> List.fold (fun (mappings: Map<TableMappingKey, TableMapping>) joinPI ->
                     let _, updatedMappings = TableMappings.tryGetByRootOrAlias joinPI.Alias mappings
                     updatedMappings
                 ) outerSource.TableMappings
 
             // Update inner table mapping with join aliases (this will always be 1 mapping being joined)
-            let innerTableMappings = 
+            let innerTableMappings =
                 innerProperties
-                |> List.fold (fun (mappings: Map<TableMappingKey, TableMapping>) joinPI -> 
+                |> List.fold (fun (mappings: Map<TableMappingKey, TableMapping>) joinPI ->
                     let _, updatedMappings = TableMappings.tryGetByRootOrAlias joinPI.Alias mappings
                     updatedMappings
                 ) innerSource.TableMappings
-        
+
             mergeTableMappings (outerTableMappings, innerTableMappings)
 
-        let outerQuery = outerSource |> getQueryOrDefault
-        let innerTableNameAsAlias = 
-            innerProperties 
+        let ir = outerSource |> getQueryOrDefault
+        let innerTableNameAsAlias =
+            innerProperties
             |> Seq.map (fun p -> p, mergedTables[TableAliasKey p.Alias])
             |> Seq.map (fun (p, tbl) -> $"%s{tbl.Schema}.%s{tbl.Name} AS %s{p.Alias}")
             |> Seq.head
-        
-        let joinOn = 
+
+        let joinCondition =
             List.zip outerProperties innerProperties
-            |> List.fold (fun (j: Join) (outerProp, innerProp) -> 
-                j.On($"%s{outerProp.Alias}.%s{outerProp.Member.Name}", $"%s{innerProp.Alias}.%s{innerProp.Member.Name}")
-            ) (Join())
-            
-        QuerySource<'JoinResult, Query>(outerQuery.Join(innerTableNameAsAlias, fun j -> joinOn), mergedTables)
+            |> List.fold (fun (acc: WhereClause) (outerProp, innerProp) ->
+                let cond = CompareColumns($"%s{outerProp.Alias}.%s{outerProp.Member.Name}", Eq, $"%s{innerProp.Alias}.%s{innerProp.Member.Name}")
+                WhereClause.combineAnd acc cond
+            ) WhereClause.Empty
+
+        let joinClause = { Kind = InnerJoin; Table = innerTableNameAsAlias; Condition = joinCondition }
+        QuerySource<'JoinResult, SelectQueryIR>({ ir with Joins = ir.Joins @ [joinClause] }, mergedTables)
 
     /// LEFT JOIN table on one or more columns
     [<CustomOperation("leftJoin", MaintainsVariableSpace = true, IsLikeJoin = true, JoinConditionWord = "on")>]
-    member this.LeftJoin (outerSource: QuerySource<'Outer>, 
-                          innerSource: QuerySource<'Inner>, 
-                          outerKeySelector: Expression<Func<'Outer,'Key>>, 
-                          innerKeySelector: Expression<Func<'Inner option,'Key>>, 
-                          resultSelector: Expression<Func<'Outer,'Inner option,'JoinResult>> ) = 
+    member this.LeftJoin (outerSource: QuerySource<'Outer>,
+                          innerSource: QuerySource<'Inner>,
+                          outerKeySelector: Expression<Func<'Outer,'Key>>,
+                          innerKeySelector: Expression<Func<'Inner option,'Key>>,
+                          resultSelector: Expression<Func<'Outer,'Inner option,'JoinResult>> ) =
 
         let outerProperties = LinqExpressionVisitors.visitJoin<'Outer, 'Key> outerKeySelector
         let innerProperties = LinqExpressionVisitors.visitJoin<'Inner option, 'Key> innerKeySelector
-        
-        let mergedTables = 
+
+        let mergedTables =
             // Update outer table mappings with join aliases
-            let outerTableMappings = 
+            let outerTableMappings =
                 outerProperties
-                |> List.fold (fun (mappings: Map<TableMappingKey, TableMapping>) joinPI -> 
+                |> List.fold (fun (mappings: Map<TableMappingKey, TableMapping>) joinPI ->
                     let _, updatedMappings = TableMappings.tryGetByRootOrAlias joinPI.Alias mappings
                     updatedMappings
                 ) outerSource.TableMappings
 
             // Update inner table mappings with join aliases
-            let innerTableMappings = 
+            let innerTableMappings =
                 innerProperties
-                |> List.fold (fun (mappings: Map<TableMappingKey, TableMapping>) joinPI -> 
+                |> List.fold (fun (mappings: Map<TableMappingKey, TableMapping>) joinPI ->
                     let _, updatedMappings = TableMappings.tryGetByRootOrAlias joinPI.Alias mappings
                     updatedMappings
                 ) innerSource.TableMappings
-        
+
             mergeTableMappings (outerTableMappings, innerTableMappings)
 
-        let outerQuery = outerSource |> getQueryOrDefault
-        let innerTableNameAsAlias = 
-            innerProperties 
+        let ir = outerSource |> getQueryOrDefault
+        let innerTableNameAsAlias =
+            innerProperties
             |> Seq.map (fun p -> p, mergedTables[TableAliasKey p.Alias])
             |> Seq.map (fun (p, tbl) -> $"%s{tbl.Schema}.%s{tbl.Name} AS %s{p.Alias}")
             |> Seq.head
 
-        let joinOn = 
+        let joinCondition =
             List.zip outerProperties innerProperties
-            |> List.fold (fun (j: Join) (outerProp, innerProp) -> 
-                j.On($"%s{outerProp.Alias}.%s{outerProp.Member.Name}", $"%s{innerProp.Alias}.%s{innerProp.Member.Name}")
-            ) (Join())
-            
-        QuerySource<'JoinResult, Query>(outerQuery.LeftJoin(innerTableNameAsAlias, fun j -> joinOn), mergedTables)
+            |> List.fold (fun (acc: WhereClause) (outerProp, innerProp) ->
+                let cond = CompareColumns($"%s{outerProp.Alias}.%s{outerProp.Member.Name}", Eq, $"%s{innerProp.Alias}.%s{innerProp.Member.Name}")
+                WhereClause.combineAnd acc cond
+            ) WhereClause.Empty
+
+        let joinClause = { Kind = LeftJoin; Table = innerTableNameAsAlias; Condition = joinCondition }
+        QuerySource<'JoinResult, SelectQueryIR>({ ir with Joins = ir.Joins @ [joinClause] }, mergedTables)
 
     /// References a table variable from a correlated parent query from within a subquery.
     [<CustomOperation("correlate", MaintainsVariableSpace = true, IsLikeZip = true)>]
@@ -353,8 +345,8 @@ type SelectBuilder<'Selected, 'Mapped> () =
                       resultSelector: Expression<Func<'Outer,'Inner,'JoinResult>> ) =
 
         let mergedTables = mergeTableMappings (outerSource.TableMappings, innerSource.TableMappings)
-        let query = outerSource |> getQueryOrDefault
-        QuerySource<'JoinResult, Query>(query, mergedTables)
+        let ir = outerSource |> getQueryOrDefault
+        QuerySource<'JoinResult, SelectQueryIR>(ir, mergedTables)
 
     /// Introduces an INNER JOIN table binding (use with on' to complete the join).
     /// Unlike the standard `join ... on`, this allows predicate-style join conditions.
@@ -383,10 +375,10 @@ type SelectBuilder<'Selected, 'Mapped> () =
             TableAlias = innerAlias
         }
 
-        let query = outerSource |> getQueryOrDefault
-        // Store pending join info associated with this query
-        PendingJoins.set query pendingJoin
-        QuerySource<'JoinResult, Query>(query, mergedTables)
+        let ir = outerSource |> getQueryOrDefault
+        // Store pending join info associated with this IR object (same reference)
+        PendingJoins.set ir pendingJoin
+        QuerySource<'JoinResult, SelectQueryIR>(ir, mergedTables)
 
     /// Introduces a LEFT JOIN table binding (use with on' to complete the join).
     /// Unlike the standard `leftJoin ... on`, this allows predicate-style join conditions.
@@ -415,146 +407,147 @@ type SelectBuilder<'Selected, 'Mapped> () =
             TableAlias = innerAlias
         }
 
-        let query = outerSource |> getQueryOrDefault
-        // Store pending join info associated with this query
-        PendingJoins.set query pendingJoin
-        QuerySource<'JoinResult, Query>(query, mergedTables)
+        let ir = outerSource |> getQueryOrDefault
+        // Store pending join info associated with this IR object (same reference)
+        PendingJoins.set ir pendingJoin
+        QuerySource<'JoinResult, SelectQueryIR>(ir, mergedTables)
 
     /// Completes a pending join with a predicate expression.
     /// Used after `join'` or `leftJoin'` to specify the join condition.
     /// Example: `on' (o.Id = d.Id && d.Type = "X")`
     [<CustomOperation("on'", MaintainsVariableSpace = true)>]
-    member this.OnPredicate (state: QuerySource<'T, Query>,
+    member this.OnPredicate (state: QuerySource<'T, SelectQueryIR>,
                              [<ProjectionParameter>] joinPredicate: Expression<Func<'T, bool>>) =
-        let query = state.Query
+        let ir = state.Query
         let pendingJoin =
-            match PendingJoins.tryTake query with
+            match PendingJoins.tryTake ir with
             | Some pj -> pj
             | None -> failwith "on' must be used after join' or leftJoin'"
 
         let tableMappings = state.TableMappings |> Map.values
 
-        // Build the join predicate visitor
-        let joinBuilder = LinqExpressionVisitors.visitJoinPredicate<'T> tableMappings joinPredicate qualifyColumnWithAlias
+        // Build the join predicate as a WhereClause
+        let joinCondition = LinqExpressionVisitors.visitJoinPredicate<'T> tableMappings joinPredicate qualifyColumnWithAlias
 
         // Create the table name with alias
         let tableNameAsAlias = $"{pendingJoin.TableName} AS {pendingJoin.TableAlias}"
 
-        // Apply the join based on type
-        let updatedQuery =
+        // Build the join clause
+        let joinKind =
             match pendingJoin.JoinType with
-            | JoinType.Inner ->
-                query.Join(tableNameAsAlias, fun j -> joinBuilder j)
-            | JoinType.Left ->
-                query.LeftJoin(tableNameAsAlias, fun j -> joinBuilder j)
+            | JoinType.Inner -> InnerJoin
+            | JoinType.Left -> LeftJoin
 
-        QuerySource<'T, Query>(updatedQuery, state.TableMappings)
+        let joinClause = { Kind = joinKind; Table = tableNameAsAlias; Condition = joinCondition }
+
+        QuerySource<'T, SelectQueryIR>({ ir with Joins = ir.Joins @ [joinClause] }, state.TableMappings)
 
     /// Sets the GROUP BY for one or more columns.
     [<CustomOperation("groupBy", MaintainsVariableSpace = true)>]
-    member this.GroupBy (state: QuerySource<'T, Query>, [<ProjectionParameter>] propertySelector) = 
+    member this.GroupBy (state: QuerySource<'T, SelectQueryIR>, [<ProjectionParameter>] propertySelector) =
         let properties = LinqExpressionVisitors.visitPropertiesSelector<'T, 'Prop> propertySelector qualifyColumnWithAlias
-        QuerySource<'T, Query>(state.Query.GroupBy(properties |> List.toArray), state.TableMappings)
+        QuerySource<'T, SelectQueryIR>({ state.Query with GroupBy = state.Query.GroupBy @ (properties |> List.ofSeq) }, state.TableMappings)
 
     /// Sets the HAVING condition.
     [<CustomOperation("having", MaintainsVariableSpace = true)>]
-    member this.Having (state: QuerySource<'T, Query>, [<ProjectionParameter>] havingExpression) = 
+    member this.Having (state: QuerySource<'T, SelectQueryIR>, [<ProjectionParameter>] havingExpression) =
+        let ir = state.Query
         let tableMappings = state.TableMappings |> Map.values
-        let having = LinqExpressionVisitors.visitHaving<'T> tableMappings havingExpression qualifyColumnWithAlias
-        QuerySource<'T, Query>(state.Query.Having(fun w -> having), state.TableMappings)
+        let newClause = LinqExpressionVisitors.visitHaving<'T> tableMappings havingExpression qualifyColumnWithAlias
+        QuerySource<'T, SelectQueryIR>({ ir with Having = WhereClause.combineAnd ir.Having newClause }, state.TableMappings)
 
     /// Sets query to return DISTINCT values
     [<CustomOperation("distinct", MaintainsVariableSpace = true)>]
-    member this.Distinct (state: QuerySource<'T, Query>) =
-        QuerySource<'T, Query>(state.Query.Distinct(), state.TableMappings)
+    member this.Distinct (state: QuerySource<'T, SelectQueryIR>) =
+        QuerySource<'T, SelectQueryIR>({ state.Query with Distinct = true }, state.TableMappings)
 
     /// Sets a CancellationToken for the query execution.
     [<CustomOperation("cancel", MaintainsVariableSpace = true)>]
-    member this.Cancel (state: QuerySource<'T, Query>, cancellationToken: CancellationToken) =
+    member this.Cancel (state: QuerySource<'T, SelectQueryIR>, cancellationToken: CancellationToken) =
         this.CancellationToken <- cancellationToken
         state
 
     /// Maps the query results into a seq.
     [<CustomOperation("mapSeq", MaintainsVariableSpace = true)>]
-    member this.MapSeq (state: QuerySource<'Selected, Query>, [<ProjectionParameter>] map: Func<'Selected, 'Mapped>) =
+    member this.MapSeq (state: QuerySource<'Selected, SelectQueryIR>, [<ProjectionParameter>] map: Func<'Selected, 'Mapped>) =
         this.MapFn <- Some map
-        QuerySource<'Mapped seq, Query>(state.Query, state.TableMappings)
-    
+        QuerySource<'Mapped seq, SelectQueryIR>(state.Query, state.TableMappings)
+
     /// Maps the query results into an array.
     [<CustomOperation("mapArray", MaintainsVariableSpace = true)>]
-    member this.MapArray (state: QuerySource<'Selected, Query>, [<ProjectionParameter>] map: Func<'Selected, 'Mapped>) =
+    member this.MapArray (state: QuerySource<'Selected, SelectQueryIR>, [<ProjectionParameter>] map: Func<'Selected, 'Mapped>) =
         this.MapFn <- Some map
-        QuerySource<'Mapped array, Query>(state.Query, state.TableMappings)
-        
+        QuerySource<'Mapped array, SelectQueryIR>(state.Query, state.TableMappings)
+
     /// Maps the query results into a list.
     [<CustomOperation("mapList", MaintainsVariableSpace = true)>]
-    member this.MapList (state: QuerySource<'Selected, Query>, [<ProjectionParameter>] map: Func<'Selected, 'Mapped>) =
+    member this.MapList (state: QuerySource<'Selected, SelectQueryIR>, [<ProjectionParameter>] map: Func<'Selected, 'Mapped>) =
         this.MapFn <- Some map
-        QuerySource<'Mapped list, Query>(state.Query, state.TableMappings)
-    
+        QuerySource<'Mapped list, SelectQueryIR>(state.Query, state.TableMappings)
+
     /// Returns the query results as an array.
     [<CustomOperation("toArray", MaintainsVariableSpace = true)>]
-    member this.ToArray (state: QuerySource<'Selected, Query>) =
-        QuerySource<'Selected array, Query>(state.Query, state.TableMappings)
+    member this.ToArray (state: QuerySource<'Selected, SelectQueryIR>) =
+        QuerySource<'Selected array, SelectQueryIR>(state.Query, state.TableMappings)
 
     /// Returns the query results as a list.
     [<CustomOperation("toList", MaintainsVariableSpace = true)>]
-    member this.ToList (state: QuerySource<'Selected, Query>) =
-        QuerySource<'Selected list, Query>(state.Query, state.TableMappings)
+    member this.ToList (state: QuerySource<'Selected, SelectQueryIR>) =
+        QuerySource<'Selected list, SelectQueryIR>(state.Query, state.TableMappings)
 
     /// COUNT aggregate function
     [<CustomOperation("count", MaintainsVariableSpace = true)>]
-    member this.Count (state: QuerySource<'T, Query>) = 
-        QuerySource<ResultModifier.Count<int>, Query>(state.Query.AsCount(), state.TableMappings)
+    member this.Count (state: QuerySource<'T, SelectQueryIR>) =
+        QuerySource<ResultModifier.Count<int>, SelectQueryIR>({ state.Query with IsCount = true }, state.TableMappings)
 
     /// Applies Seq.tryHead to the 'Selected query results.
     [<CustomOperation("tryHead", MaintainsVariableSpace = true)>]
-    member this.TryHead (state: QuerySource<'Selected, Query>) = 
-        QuerySource<'Selected option, Query>(state.Query, state.TableMappings)
+    member this.TryHead (state: QuerySource<'Selected, SelectQueryIR>) =
+        QuerySource<'Selected option, SelectQueryIR>(state.Query, state.TableMappings)
 
     /// Applies Seq.tryHead to the 'Mapped query results.
     [<CustomOperation("tryHead", MaintainsVariableSpace = true)>]
-    member this.TryHead (state: QuerySource<'Mapped seq, Query>) = 
-        QuerySource<'Mapped option, Query>(state.Query, state.TableMappings)
-    
+    member this.TryHead (state: QuerySource<'Mapped seq, SelectQueryIR>) =
+        QuerySource<'Mapped option, SelectQueryIR>(state.Query, state.TableMappings)
+
     /// Applies Seq.tryHead to the 'Mapped query results.
     [<CustomOperation("tryHead", MaintainsVariableSpace = true)>]
-    member this.TryHead (state: QuerySource<'Mapped array, Query>) = 
-        QuerySource<'Mapped option, Query>(state.Query, state.TableMappings)
-        
+    member this.TryHead (state: QuerySource<'Mapped array, SelectQueryIR>) =
+        QuerySource<'Mapped option, SelectQueryIR>(state.Query, state.TableMappings)
+
     /// Applies Seq.tryHead to the 'Mapped query results.
     [<CustomOperation("tryHead", MaintainsVariableSpace = true)>]
-    member this.TryHead (state: QuerySource<'Mapped list, Query>) = 
-        QuerySource<'Mapped option, Query>(state.Query, state.TableMappings)
+    member this.TryHead (state: QuerySource<'Mapped list, SelectQueryIR>) =
+        QuerySource<'Mapped option, SelectQueryIR>(state.Query, state.TableMappings)
 
     /// Applies Seq.head to the 'Selected query results.
     [<CustomOperation("head", MaintainsVariableSpace = true)>]
-    member this.Head (state: QuerySource<'Selected, Query>) = 
-        QuerySource<ResultModifier.Head<'Selected>, Query>(state.Query, state.TableMappings)
+    member this.Head (state: QuerySource<'Selected, SelectQueryIR>) =
+        QuerySource<ResultModifier.Head<'Selected>, SelectQueryIR>(state.Query, state.TableMappings)
 
     /// Applies Seq.head to the 'Mapped query results.
     [<CustomOperation("head", MaintainsVariableSpace = true)>]
-    member this.Head (state: QuerySource<'Mapped seq, Query>) = 
-        QuerySource<ResultModifier.Head<'Mapped>, Query>(state.Query, state.TableMappings)
+    member this.Head (state: QuerySource<'Mapped seq, SelectQueryIR>) =
+        QuerySource<ResultModifier.Head<'Mapped>, SelectQueryIR>(state.Query, state.TableMappings)
 
     /// Applies Seq.head to the 'Selected query results.
     [<CustomOperation("head", MaintainsVariableSpace = true)>]
-    member this.Head (state: QuerySource<'Mapped array, Query>) = 
-        QuerySource<ResultModifier.Head<'Mapped>, Query>(state.Query, state.TableMappings)
-    
+    member this.Head (state: QuerySource<'Mapped array, SelectQueryIR>) =
+        QuerySource<ResultModifier.Head<'Mapped>, SelectQueryIR>(state.Query, state.TableMappings)
+
     /// Applies Seq.head to the 'Selected query results.
     [<CustomOperation("head", MaintainsVariableSpace = true)>]
-    member this.Head (state: QuerySource<'Mapped list, Query>) = 
-        QuerySource<ResultModifier.Head<'Mapped>, Query>(state.Query, state.TableMappings)
+    member this.Head (state: QuerySource<'Mapped list, SelectQueryIR>) =
+        QuerySource<ResultModifier.Head<'Mapped>, SelectQueryIR>(state.Query, state.TableMappings)
 
 /// A select builder that returns a select query.
-type SelectQueryBuilder<'Selected, 'Mapped> () = 
+type SelectQueryBuilder<'Selected, 'Mapped> () =
     inherit SelectBuilder<'Selected, 'Mapped>()
-    
-    member this.Run (state: QuerySource<ResultModifier.Count<int>, Query>) = 
+
+    member this.Run (state: QuerySource<ResultModifier.Count<int>, SelectQueryIR>) =
         SelectQuery<int>(state.Query)
 
-    member this.Run (state: QuerySource<'Selected, Query>) =
+    member this.Run (state: QuerySource<'Selected, SelectQueryIR>) =
         SelectQuery<'Selected>(state.Query)
 
 
@@ -562,7 +555,7 @@ type SelectQueryBuilder<'Selected, 'Mapped> () =
 type SelectTaskBuilder<'Selected, 'Mapped> (ct: ContextType) =
     inherit SelectBuilder<'Selected, 'Mapped>()
 
-    member this.RunSelected(query: Query, resultModifier) =
+    member this.RunSelected(query: SelectQueryIR, resultModifier) =
         task {
             let! ctx = ContextUtils.getContext ct
             try
@@ -583,7 +576,7 @@ type SelectTaskBuilder<'Selected, 'Mapped> (ct: ContextType) =
                 ContextUtils.disposeIfNotShared ct ctx
         }
 
-    member this.RunMapped(query: Query, resultModifier) =
+    member this.RunMapped(query: SelectQueryIR, resultModifier) =
         task {
             let! ctx = ContextUtils.getContext ct
             try
@@ -604,7 +597,7 @@ type SelectTaskBuilder<'Selected, 'Mapped> (ct: ContextType) =
                 ContextUtils.disposeIfNotShared ct ctx
         }
 
-    member private this.RunSelectExpr(query: Query, exprInfo: SelectExprVisitors.SelectExprInfo, resultModifier) =
+    member private this.RunSelectExpr(query: SelectQueryIR, exprInfo: SelectExprVisitors.SelectExprInfo, resultModifier) =
         task {
             let! ctx = ContextUtils.getContext ct
             try
@@ -627,7 +620,7 @@ type SelectTaskBuilder<'Selected, 'Mapped> (ct: ContextType) =
                 ContextUtils.disposeIfNotShared ct ctx
         }
 
-    member private this.RunSelectExprMapped(query: Query, exprInfo: SelectExprVisitors.SelectExprInfo, resultModifier) =
+    member private this.RunSelectExprMapped(query: SelectQueryIR, exprInfo: SelectExprVisitors.SelectExprInfo, resultModifier) =
         task {
             let! ctx = ContextUtils.getContext ct
             try
@@ -653,67 +646,67 @@ type SelectTaskBuilder<'Selected, 'Mapped> (ct: ContextType) =
     /// Run: default
     /// Called when no mapSeq, mapArray or mapList is present;
     /// this input will always be 'Selected -- even if select is not present.
-    member this.Run(state: QuerySource<'Selected, Query>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
+    member this.Run(state: QuerySource<'Selected, SelectQueryIR>) =
+        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
         | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, id)
         | None -> this.RunSelected(state.Query, id)
-    
+
     /// Run: toList
-    member this.Run(state: QuerySource<'Selected list, Query>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
+    member this.Run(state: QuerySource<'Selected list, SelectQueryIR>) =
+        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
         | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.toList)
         | None -> this.RunSelected(state.Query, Seq.toList)
 
     /// Run: toArray
-    member this.Run(state: QuerySource<'Selected array, Query>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
+    member this.Run(state: QuerySource<'Selected array, SelectQueryIR>) =
+        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
         | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.toArray)
         | None -> this.RunSelected(state.Query, Seq.toArray)
 
     /// Run: mapList
-    member this.Run(state: QuerySource<'Mapped list, Query>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
+    member this.Run(state: QuerySource<'Mapped list, SelectQueryIR>) =
+        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
         | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.toList)
         | None -> this.RunMapped(state.Query, Seq.toList)
 
     // Run: mapArray
-    member this.Run(state: QuerySource<'Mapped array, Query>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
+    member this.Run(state: QuerySource<'Mapped array, SelectQueryIR>) =
+        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
         | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.toArray)
         | None -> this.RunMapped(state.Query, Seq.toArray)
 
     // Run: mapSeq
-    member this.Run(state: QuerySource<'Mapped seq, Query>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
+    member this.Run(state: QuerySource<'Mapped seq, SelectQueryIR>) =
+        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
         | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, id)
         | None -> this.RunMapped(state.Query, id)
 
     // Run: tryHead - 'Selected
-    member this.Run(state: QuerySource<'Selected option, Query>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
+    member this.Run(state: QuerySource<'Selected option, SelectQueryIR>) =
+        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
         | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.tryHead)
         | None -> this.RunSelected(state.Query, Seq.tryHead)
 
     // Run: tryHead - 'Mapped
-    member this.Run(state: QuerySource<'Mapped option, Query>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
+    member this.Run(state: QuerySource<'Mapped option, SelectQueryIR>) =
+        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
         | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.tryHead)
         | None -> this.RunMapped(state.Query, Seq.tryHead)
 
     // Run: head - 'Selected
-    member this.Run(state: QuerySource<ResultModifier.Head<'Selected>, Query>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
+    member this.Run(state: QuerySource<ResultModifier.Head<'Selected>, SelectQueryIR>) =
+        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
         | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.head)
         | None -> this.RunSelected(state.Query, Seq.head)
 
     // Run: head - 'Mapped
-    member this.Run(state: QuerySource<ResultModifier.Head<'Mapped>, Query>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
+    member this.Run(state: QuerySource<ResultModifier.Head<'Mapped>, SelectQueryIR>) =
+        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
         | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.head)
         | None -> this.RunMapped(state.Query, Seq.head)
 
     // Run: count
-    member this.Run(state: QuerySource<ResultModifier.Count<int>, Query>) =
+    member this.Run(state: QuerySource<ResultModifier.Count<int>, SelectQueryIR>) =
         task {
             let! ctx = ContextUtils.getContext ct
             try return! ctx.CountAsyncWithOptions (SelectQuery<int>(state.Query), this.CancellationToken) |> Async.AwaitTask
@@ -725,7 +718,7 @@ type SelectTaskBuilder<'Selected, 'Mapped> (ct: ContextType) =
 type SelectAsyncBuilder<'Selected, 'Mapped> (ct: ContextType) =
     inherit SelectBuilder<'Selected, 'Mapped>()
 
-    member this.RunSelected(query: Query, resultModifier) =
+    member this.RunSelected(query: SelectQueryIR, resultModifier) =
         async {
             let! ctx = ContextUtils.getContext ct |> Async.AwaitTask
             try
@@ -748,7 +741,7 @@ type SelectAsyncBuilder<'Selected, 'Mapped> (ct: ContextType) =
                 ContextUtils.disposeIfNotShared ct ctx
         }
 
-    member this.RunMapped(query: Query, resultModifier) =
+    member this.RunMapped(query: SelectQueryIR, resultModifier) =
         async {
             let! ctx = ContextUtils.getContext ct |> Async.AwaitTask
             try
@@ -771,7 +764,7 @@ type SelectAsyncBuilder<'Selected, 'Mapped> (ct: ContextType) =
                 ContextUtils.disposeIfNotShared ct ctx
         }
 
-    member private this.RunSelectExpr(query: Query, exprInfo: SelectExprVisitors.SelectExprInfo, resultModifier) =
+    member private this.RunSelectExpr(query: SelectQueryIR, exprInfo: SelectExprVisitors.SelectExprInfo, resultModifier) =
         async {
             let! ctx = ContextUtils.getContext ct |> Async.AwaitTask
             try
@@ -796,7 +789,7 @@ type SelectAsyncBuilder<'Selected, 'Mapped> (ct: ContextType) =
                 ContextUtils.disposeIfNotShared ct ctx
         }
 
-    member private this.RunSelectExprMapped(query: Query, exprInfo: SelectExprVisitors.SelectExprInfo, resultModifier) =
+    member private this.RunSelectExprMapped(query: SelectQueryIR, exprInfo: SelectExprVisitors.SelectExprInfo, resultModifier) =
         async {
             let! ctx = ContextUtils.getContext ct |> Async.AwaitTask
             try
@@ -824,67 +817,67 @@ type SelectAsyncBuilder<'Selected, 'Mapped> (ct: ContextType) =
     /// Run: default
     /// Called when no mapSeq, mapArray or mapList is present;
     /// this input will always be 'Selected -- even if select is not present.
-    member this.Run(state: QuerySource<'Selected, Query>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
+    member this.Run(state: QuerySource<'Selected, SelectQueryIR>) =
+        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
         | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, id)
         | None -> this.RunSelected(state.Query, id)
 
     /// Run: toList
-    member this.Run(state: QuerySource<'Selected list, Query>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
+    member this.Run(state: QuerySource<'Selected list, SelectQueryIR>) =
+        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
         | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.toList)
         | None -> this.RunSelected(state.Query, Seq.toList)
 
     /// Run: toArray
-    member this.Run(state: QuerySource<'Selected array, Query>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
+    member this.Run(state: QuerySource<'Selected array, SelectQueryIR>) =
+        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
         | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.toArray)
         | None -> this.RunSelected(state.Query, Seq.toArray)
 
     /// Run: mapList
-    member this.Run(state: QuerySource<'Mapped list, Query>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
+    member this.Run(state: QuerySource<'Mapped list, SelectQueryIR>) =
+        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
         | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.toList)
         | None -> this.RunMapped(state.Query, Seq.toList)
 
     // Run: mapArray
-    member this.Run(state: QuerySource<'Mapped array, Query>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
+    member this.Run(state: QuerySource<'Mapped array, SelectQueryIR>) =
+        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
         | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.toArray)
         | None -> this.RunMapped(state.Query, Seq.toArray)
 
     // Run: mapSeq
-    member this.Run(state: QuerySource<'Mapped seq, Query>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
+    member this.Run(state: QuerySource<'Mapped seq, SelectQueryIR>) =
+        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
         | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, id)
         | None -> this.RunMapped(state.Query, id)
 
     // Run: tryHead - 'Selected
-    member this.Run(state: QuerySource<'Selected option, Query>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
+    member this.Run(state: QuerySource<'Selected option, SelectQueryIR>) =
+        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
         | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.tryHead)
         | None -> this.RunSelected(state.Query, Seq.tryHead)
 
     // Run: tryHead - 'Mapped
-    member this.Run(state: QuerySource<'Mapped option, Query>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
+    member this.Run(state: QuerySource<'Mapped option, SelectQueryIR>) =
+        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
         | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.tryHead)
         | None -> this.RunMapped(state.Query, Seq.tryHead)
 
     // Run: head - 'Selected
-    member this.Run(state: QuerySource<ResultModifier.Head<'Selected>, Query>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
+    member this.Run(state: QuerySource<ResultModifier.Head<'Selected>, SelectQueryIR>) =
+        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
         | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.head)
         | None -> this.RunSelected(state.Query, Seq.head)
 
     // Run: head - 'Mapped
-    member this.Run(state: QuerySource<ResultModifier.Head<'Mapped>, Query>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(state.Query) with
+    member this.Run(state: QuerySource<ResultModifier.Head<'Mapped>, SelectQueryIR>) =
+        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
         | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.head)
         | None -> this.RunMapped(state.Query, Seq.head)
 
     // Run: count
-    member this.Run(state: QuerySource<ResultModifier.Count<int>, Query>) =
+    member this.Run(state: QuerySource<ResultModifier.Count<int>, SelectQueryIR>) =
         async {
             let! ctx = ContextUtils.getContext ct |> Async.AwaitTask
             let! asyncCancel = Async.CancellationToken
@@ -911,5 +904,3 @@ let inline selectTask< ^Selected, ^Mapped, ^Context
     (ctSource: ^Context) =
     let ct = ContextTypeResolver.resolve ctSource
     SelectTaskBuilder< ^Selected, ^Mapped>(ct)
-
-

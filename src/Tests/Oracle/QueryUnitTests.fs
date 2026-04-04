@@ -287,7 +287,7 @@ let ``Update Query with Where``() =
             set c.NAME "Smith"
             where (c.NAME = "Doe")
         }
-        |> toSql
+        |> toUpdateSql
 
     sql =! """UPDATE "OT"."CUSTOMERS" SET "NAME" = :p0 WHERE ("OT"."CUSTOMERS"."NAME" = :p1)"""
 
@@ -300,7 +300,7 @@ let ``Update Query with multiple Wheres``() =
             where (c.NAME = "Doe")
             where (c.CUSTOMER_ID = 123L)
         }
-        |> toSql
+        |> toUpdateSql
 
     sql =! """UPDATE "OT"."CUSTOMERS" SET "NAME" = :p0 WHERE ("OT"."CUSTOMERS"."NAME" = :p1 AND ("OT"."CUSTOMERS"."CUSTOMER_ID" = :p2))"""
 
@@ -312,7 +312,7 @@ let ``Update Query with No Where``() =
             set c.NAME "Smith"
             updateAll
         }
-        |> toSql
+        |> toUpdateSql
 
     sql =! "UPDATE \"OT\".\"CUSTOMERS\" SET \"NAME\" = :p0"
 
@@ -384,13 +384,13 @@ let ``Insert Query without Identity``() =
         insert {
             into OT.COUNTRIES
             entity
-                { 
+                {
                     OT.COUNTRIES.COUNTRY_ID = "WL"
                     OT.COUNTRIES.REGION_ID = Some 2
                     OT.COUNTRIES.COUNTRY_NAME = "Wonderland"
                 }
         }
-        |> toSql
+        |> toInsertSql
 
     sql =! "INSERT INTO \"OT\".\"COUNTRIES\" (\"COUNTRY_ID\", \"COUNTRY_NAME\", \"REGION_ID\") VALUES (:p0, :p1, :p2)"
 
@@ -399,14 +399,14 @@ let ``Insert Query with Identity``() =
     let sql =  
         insert {
             for r in OT.REGIONS do
-            entity 
-                { 
+            entity
+                {
                     OT.REGIONS.REGION_ID = 0
                     OT.REGIONS.REGION_NAME = "Outlands"
                 }
             getId r.REGION_ID
         }
-        |> toSql
+        |> toInsertSql
 
     sql =! "INSERT INTO \"OT\".\"REGIONS\" (\"REGION_NAME\") VALUES (:p0)"
 
@@ -430,7 +430,7 @@ let ``Multiple Inserts Fix``() =
                 into OT.COUNTRIES
                 entities countries
             }
-            |> toSql
+            |> toInsertSql
 
         let expected = 
             let sb = new System.Text.StringBuilder()

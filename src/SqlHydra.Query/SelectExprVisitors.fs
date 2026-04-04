@@ -6,7 +6,6 @@ module internal SqlHydra.Query.SelectExprVisitors
 open System
 open System.Linq.Expressions
 open System.Reflection
-open SqlKata
 open FastExpressionCompiler
 open LinqExpressionVisitors
 
@@ -27,14 +26,14 @@ type SelectExprInfo = {
 module SelectExprStore =
     open System.Runtime.CompilerServices
 
-    let private store = ConditionalWeakTable<SqlKata.Query, SelectExprInfo>()
+    let private store = ConditionalWeakTable<obj, SelectExprInfo>()
 
-    let set (query: SqlKata.Query) (info: SelectExprInfo) =
-        store.Remove(query) |> ignore
-        store.Add(query, info)
+    let set (key: obj) (info: SelectExprInfo) =
+        store.Remove(key) |> ignore
+        store.Add(key, info)
 
-    let tryGet (query: SqlKata.Query) =
-        match store.TryGetValue(query) with
+    let tryGet (key: obj) =
+        match store.TryGetValue(key) with
         | true, info -> Some info
         | _ -> None
 

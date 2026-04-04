@@ -157,7 +157,7 @@ let ``Update Query with Where``() =
             set c.AccountNumber "123"
             where (c.AccountNumber = "000")
         }
-        |> toSql
+        |> toUpdateSql
 
     sql =! "UPDATE [Sales].[Customer] SET [AccountNumber] = @p0 WHERE ([Sales].[Customer].[AccountNumber] = @p1)"
 
@@ -170,7 +170,7 @@ let ``Update Query with multiple Wheres``() =
             where (c.AccountNumber = "000")
             where (c.CustomerID = 123)
         }
-        |> toSql
+        |> toUpdateSql
 
     sql =! "UPDATE [Sales].[Customer] SET [AccountNumber] = @p0 WHERE ([Sales].[Customer].[AccountNumber] = @p1 AND ([Sales].[Customer].[CustomerID] = @p2))"
 
@@ -182,7 +182,7 @@ let ``Update Query with No Where``() =
             set c.AccountNumber "123"
             updateAll
         }
-        |> toSql
+        |> toUpdateSql
 
     sql =! "UPDATE [Sales].[Customer] SET [AccountNumber] = @p0"
 
@@ -255,8 +255,8 @@ let ``Insert Query without Identity``() =
     let sql =  
         insert {
             into Sales.Customer
-            entity 
-                { 
+            entity
+                {
                     Sales.Customer.AccountNumber = "123"
                     Sales.Customer.rowguid = System.Guid.NewGuid()
                     Sales.Customer.ModifiedDate = System.DateTime.Now
@@ -266,7 +266,7 @@ let ``Insert Query without Identity``() =
                     Sales.Customer.CustomerID = 0
                 }
         }
-        |> toSql
+        |> toInsertSql
 
     sql =! "INSERT INTO [Sales].[Customer] ([CustomerID], [PersonID], [StoreID], [TerritoryID], [AccountNumber], [rowguid], [ModifiedDate]) VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6)" 
 
@@ -275,8 +275,8 @@ let ``Insert Query with Identity``() =
     let sql =  
         insert {
             for c in Sales.Customer do
-            entity 
-                { 
+            entity
+                {
                     Sales.Customer.AccountNumber = "123"
                     Sales.Customer.rowguid = System.Guid.NewGuid()
                     Sales.Customer.ModifiedDate = System.DateTime.Now
@@ -287,6 +287,6 @@ let ``Insert Query with Identity``() =
                 }
             getId c.CustomerID
         }
-        |> toSql
+        |> toInsertSql
 
     sql =! "INSERT INTO [Sales].[Customer] ([PersonID], [StoreID], [TerritoryID], [AccountNumber], [rowguid], [ModifiedDate]) VALUES (@p0, @p1, @p2, @p3, @p4, @p5);SELECT scope_identity() as Id" 

@@ -299,7 +299,7 @@ let ``Update Query with Where``() =
             set c.LastName "Doe"
             where (c.CustomerID = 123L)
         }
-        |> toSql
+        |> toUpdateSql
 
     sql =! """UPDATE "main"."Customer" SET "FirstName" = @p0, "LastName" = @p1 WHERE ("main"."Customer"."CustomerID" = @p2)"""
 
@@ -313,7 +313,7 @@ let ``Update Query with multiple Wheres``() =
             where (c.CustomerID = 123L)
             where (c.FirstName = "Bob")
         }
-        |> toSql
+        |> toUpdateSql
 
     sql =! """UPDATE "main"."Customer" SET "FirstName" = @p0, "LastName" = @p1 WHERE ("main"."Customer"."CustomerID" = @p2 AND ("main"."Customer"."FirstName" = @p3))"""
 
@@ -326,7 +326,7 @@ let ``Update Query with No Where``() =
             set c.LastName "Doe"
             updateAll
         }
-        |> toSql
+        |> toUpdateSql
 
     "UPDATE \"main\".\"Customer\" SET \"FirstName\" = @p0, \"LastName\" = @p1" =! sql
 
@@ -403,8 +403,8 @@ let ``Insert Query with Identity``() =
     let sql = 
         insert {
             for b in table<main.BuildVersion> do
-            entity 
-                { 
+            entity
+                {
                     main.BuildVersion.SystemInformationID = 0L
                     main.BuildVersion.``Database Version`` = "v1.0"
                     main.BuildVersion.VersionDate = System.DateTime.Today
@@ -412,7 +412,7 @@ let ``Insert Query with Identity``() =
                 }
             getId b.SystemInformationID
         }
-        |> toSql
+        |> toInsertSql
 
     sql =! "INSERT INTO \"main\".\"BuildVersion\" (\"Database Version\", \"VersionDate\", \"ModifiedDate\") VALUES (@p0, @p1, @p2);select last_insert_rowid() as id" 
 

@@ -1,43 +1,42 @@
-﻿namespace SqlHydra.Query
+namespace SqlHydra.Query
 
 open System.Reflection
-open SqlKata
 open System.Collections.Generic
 open System
 
-type TableMapping = 
-    { 
+type TableMapping =
+    {
         Name: string
-        Schema: string 
+        Schema: string
     }
     member this.IsInTable (m: Linq.Expressions.MemberExpression) =
         m.Member.ReflectedType.DeclaringType <> null &&
-        m.Member.ReflectedType.DeclaringType.Name = this.Schema && 
+        m.Member.ReflectedType.DeclaringType.Name = this.Schema &&
         m.Member.ReflectedType.Name = this.Name
 
-type TableMappingKey = 
+type TableMappingKey =
     | Root
     | TableAliasKey of string
-        
-module TableMappings = 
+
+module TableMappings =
 
     /// Tries to get TableMapping by Root, then by Alias.
     /// If found by Root, replaces with a TableAliasKey.
     let tryGetByRootOrAlias (tableAlias: string) (tableMappings: Map<TableMappingKey, TableMapping>) =
         match tableMappings.TryFind(Root) with
-        | Some tbl -> 
-            let updatedTableMappings = tableMappings.Remove(Root).Add(TableAliasKey tableAlias, tbl)  
+        | Some tbl ->
+            let updatedTableMappings = tableMappings.Remove(Root).Add(TableAliasKey tableAlias, tbl)
             Some tbl, updatedTableMappings
-        | None -> 
+        | None ->
             match tableMappings.TryFind(TableAliasKey tableAlias) with
             | Some tbl -> Some tbl, tableMappings
             | None -> None, tableMappings
 
     /// Gets the first TableMapping.
-    let getFirst (tableMappings: Map<TableMappingKey, TableMapping>) = 
+    let getFirst (tableMappings: Map<TableMappingKey, TableMapping>) =
         tableMappings |> Map.toList |> List.map snd |> List.head
 
-module FQ = 
+module FQ =
 
     /// Fully qualifies a column with: {?schema}.{table}.{column}
     let internal fullyQualifyColumn (tables: Map<TableMappingKey, TableMapping>) (tableAlias: string) (column: Reflection.MemberInfo) =
@@ -49,42 +48,25 @@ module AtLeastOne =
     type AtLeastOne<'T> = private { Items : 'T seq }
 
     /// Returns Some if seq contains at least one item, else returns None.
-    let tryCreate<'T> (items: 'T seq) = 
+    let tryCreate<'T> (items: 'T seq) =
         if items |> Seq.length > 0
         then Some { Items = items }
         else None
 
-    let getSeq { Items = atLeastOne } = 
+    let getSeq { Items = atLeastOne } =
         atLeastOne
 
-/// Wraps a SqlKata query parameter to provide the generated ProviderDbType attribute value.
-type QueryParameter = 
+/// Wraps a query parameter to provide the generated ProviderDbType attribute value.
+type QueryParameter =
     {
         Value: obj
         ProviderDbType: string option
     }
     /// Provides a more compact representation of the QueryParameter when logging queries.
-    override this.ToString() = 
+    override this.ToString() =
         match this.ProviderDbType with
         | Some providerDbType -> $"%s{providerDbType}: {this.Value}"
         | None -> $"obj: {this.Value}"
-
-/// Wraps a SqlResult to customize query logging.
-type LoggedSqlResult(r: SqlResult) = 
-    inherit SqlResult()
-    override this.ToString() = 
-        let sb = Text.StringBuilder()
-        sb.AppendLine(r.Sql) |> ignore
-        for kvp in r.NamedBindings do
-            sb.AppendLine($"- {kvp.Key}: {kvp.Value}") |> ignore
-        sb.ToString()
-
-type InsertType =
-    | Insert
-    | InsertOrReplace
-    | OnConflictDoUpdate of conflictFields: string list * updateFields: string list
-    | OnConflictDoNothing of conflictFields: string list
-    | InsertOrUpdateOnUnique of keyFields: string list * updateFields: string list
 
 type InsertQuerySpec<'T, 'Identity> =
     {
@@ -95,33 +77,21 @@ type InsertQuerySpec<'T, 'Identity> =
         OutputFields: OutputField list
         InsertType: InsertType
     }
-    static member Default : InsertQuerySpec<'T, 'Identity> = 
+    static member Default : InsertQuerySpec<'T, 'Identity> =
         { Table = ""; Entities = []; Fields = []; IdentityField = None; OutputFields = []; InsertType = Insert }
 
-and OutputField = 
-    {
-        ColumnName: string
-        PropertyType: Type
-        Nullability: Nullability
-    }
-
-and Nullability = 
-    | IsOptional
-    | IsNullable
-    | NotNullable
-
-type UpdateQuerySpec<'T, 'UpdateReturn> = 
+type UpdateQuerySpec<'T, 'UpdateReturn> =
     {
         Table: string
         Entity: 'T option
         Fields: string list
         SetValues: (string * obj) list
-        Where: Query option
+        Where: WhereClause
         OutputFields: OutputField list
         UpdateAll: bool
     }
-    static member Default : UpdateQuerySpec<'T, 'UpdateReturn> = 
-        { Table = ""; Entity = Option<'T>.None; Fields = []; SetValues = []; Where = None; OutputFields = []; UpdateAll = false }
+    static member Default : UpdateQuerySpec<'T, 'UpdateReturn> =
+        { Table = ""; Entity = Option<'T>.None; Fields = []; SetValues = []; Where = WhereClause.Empty; OutputFields = []; UpdateAll = false }
 
 type QuerySource<'T>(tableMappings) =
     interface IEnumerable<'T> with
@@ -146,29 +116,27 @@ type PendingJoin = {
 }
 
 /// Module to store pending join info for queries using predicate-style joins.
-/// This is a workaround for F# CE limitations that don't preserve subtype info.
+/// Uses a ConditionalWeakTable keyed on a boxed reference cell for GC-safe association.
 module PendingJoins =
     open System.Runtime.CompilerServices
 
-    // Use ConditionalWeakTable to associate PendingJoin with Query objects
-    // without preventing garbage collection of the Query
-    let private pendingJoins = ConditionalWeakTable<SqlKata.Query, PendingJoin>()
+    // Use a boxed ref cell as a unique identity key per query IR
+    let private pendingJoins = ConditionalWeakTable<obj, PendingJoin>()
 
-    /// Associates a pending join with a query
-    let set (query: SqlKata.Query) (pendingJoin: PendingJoin) =
-        // Remove any existing pending join first
-        pendingJoins.Remove(query) |> ignore
-        pendingJoins.Add(query, pendingJoin)
+    /// Associates a pending join with a query key object
+    let set (key: obj) (pendingJoin: PendingJoin) =
+        pendingJoins.Remove(key) |> ignore
+        pendingJoins.Add(key, pendingJoin)
 
-    /// Gets and removes the pending join for a query
-    let tryTake (query: SqlKata.Query) =
-        match pendingJoins.TryGetValue(query) with
+    /// Gets and removes the pending join for a query key
+    let tryTake (key: obj) =
+        match pendingJoins.TryGetValue(key) with
         | true, pj ->
-            pendingJoins.Remove(query) |> ignore
+            pendingJoins.Remove(key) |> ignore
             Some pj
         | false, _ -> None
 
-module internal KataUtils = 
+module internal KataUtils =
 
     // Manually convert DateOnly to DateTime and TimeOnly to TimeSpan (until Microsoft.Data.SqlClient handles)
     let convertIfDateOnlyTimeOnly (value: obj) =
@@ -180,18 +148,18 @@ module internal KataUtils =
         | _ -> value
 
     /// Boxes values (and option values)
-    let private boxValueOrOption (value: obj) = 
-        if isNull value then 
+    let private boxValueOrOption (value: obj) =
+        if isNull value then
             box System.DBNull.Value
         else
             match value.GetType() with
-            | t when t.IsGenericType && t.Name.StartsWith("FSharpOption") -> 
+            | t when t.IsGenericType && t.Name.StartsWith("FSharpOption") ->
                 t.GetProperty("Value").GetValue(value)
-            | t when t.IsGenericType && t.GetGenericTypeDefinition() = typedefof<Nullable<_>> -> 
+            | t when t.IsGenericType && t.GetGenericTypeDefinition() = typedefof<Nullable<_>> ->
                 t.GetProperty("Value").GetValue(value)
             | _ -> value
-            |> function 
-                | null -> box System.DBNull.Value 
+            |> function
+                | null -> box System.DBNull.Value
                 | o -> o
 
     let private getProviderDbTypeName (p: MemberInfo) =
@@ -204,74 +172,69 @@ module internal KataUtils =
         ; ProviderDbType = getProviderDbTypeName p } :> obj
 
     let getQueryParameterForEntity (entity: 'T) (p: PropertyInfo) =
-        p.GetValue(entity) 
+        p.GetValue(entity)
         |> getQueryParameterForValue p
-        
-    let fromUpdate (spec: UpdateQuerySpec<'T, 'UpdateReturn>) = 
-        let kvps = 
+
+    let fromUpdate (spec: UpdateQuerySpec<'T, 'UpdateReturn>) : UpdateQueryIR =
+        let kvps =
             match spec.Entity, spec.SetValues with
-            | Some entity, [] -> 
-                match spec.Fields with 
-                | [] -> 
-                    FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>) 
+            | Some entity, [] ->
+                match spec.Fields with
+                | [] ->
+                    FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>)
                     |> Array.map (fun p -> p.Name, getQueryParameterForEntity entity p)
-                        
-                | fields -> 
+                    |> Array.toList
+
+                | fields ->
                     let included = fields |> Set.ofList
-                    FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>) 
-                    |> Array.filter (fun p -> included.Contains(p.Name)) 
+                    FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>)
+                    |> Array.filter (fun p -> included.Contains(p.Name))
                     |> Array.map (fun p -> p.Name, getQueryParameterForEntity entity p)
+                    |> Array.toList
 
             | Some _, _ -> failwith "Cannot have both `entity` and `set` operations in an `update` expression."
             | None, [] -> failwith "Either an `entity` or `set` operations must be present in an `update` expression."
-            | None, setValues -> setValues |> List.toArray
-                    
-        let preparedKvps = 
-            kvps 
-            |> Seq.map (fun (key,value) -> key, value)
-            |> dict
-            |> Seq.map id
+            | None, setValues -> setValues
 
-        let q = Query(spec.Table).AsUpdate(preparedKvps)
+        {
+            Table = spec.Table
+            SetColumns = kvps
+            Where = spec.Where
+            OutputFields = spec.OutputFields
+        }
 
-        // Apply `where` clause
-        match spec.Where with
-        | Some where -> q.Where(fun w -> where)
-        | None -> q
-
-    let fromInsert (spec: InsertQuerySpec<'T, 'InsertReturn>) =
-        let includedProperties = 
+    let fromInsert (spec: InsertQuerySpec<'T, 'InsertReturn>) : InsertQueryIR =
+        let includedProperties =
             match spec.Fields with
-            | [] -> 
-                FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>) 
+            | [] ->
+                FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>)
             | fields ->
                 let included = fields |> Set.ofList
-                FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>) 
-                |> Array.filter (fun p -> included.Contains(p.Name)) 
-    
+                FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>)
+                |> Array.filter (fun p -> included.Contains(p.Name))
+
         match spec.Entities with
-        | [] -> 
+        | [] ->
             failwith "At least one `entity` or `entities` must be set in the `insert` builder."
 
-        | [ entity ] -> 
-            let keyValuePairs =
-                includedProperties
-                |> Array.map (fun p -> KeyValuePair(p.Name, getQueryParameterForEntity entity p))
-                |> Array.toList
-            Query(spec.Table).AsInsert(keyValuePairs, returnId = spec.IdentityField.IsSome)
-
-        | entities -> 
-            if spec.IdentityField.IsSome 
+        | entities ->
+            if spec.IdentityField.IsSome && entities.Length > 1
             then failwith "`getId` is not currently supported for multiple inserts via the `entities` operation."
-            let columns = includedProperties |> Array.map (fun p -> p.Name)
-            let rowsValues =
+            let columns = includedProperties |> Array.map (fun p -> p.Name) |> Array.toList
+            let rows =
                 entities
                 |> List.map (fun entity ->
                     includedProperties
                     |> Array.map (fun p -> getQueryParameterForEntity entity p)
-                    |> Array.toSeq
                 )
-            Query(spec.Table).AsInsert(columns, rowsValues)
+            {
+                Table = spec.Table
+                Columns = columns
+                Rows = rows
+                IdentityField = spec.IdentityField
+                InsertType = spec.InsertType
+                OutputFields = spec.OutputFields
+            }
 
     /// Fails if `getId` identity field is used as an `onConflict` target.
     let failIfIdentityOnConflict spec =
@@ -285,27 +248,26 @@ module internal KataUtils =
 
 
 [<AbstractClass>]
-type SelectQuery() = 
-    abstract member ToKataQuery : unit -> SqlKata.Query
+type SelectQuery() =
+    /// Returns the underlying SelectQueryIR. Used by subquery expressions.
+    abstract member SelectIR: SelectQueryIR
+    /// Compiles the query using the given emitter. Used by toSql test helpers.
+    abstract member CompileWith: ISqlEmitter -> CompiledQuery
 
-type SelectQuery<'T>(query: SqlKata.Query) = 
+type SelectQuery<'T>(ir: SelectQueryIR) =
     inherit SelectQuery()
-    member this.KataQuery = query
-    override this.ToKataQuery() = query
+    member this.IR = ir
+    override this.SelectIR = ir
+    override this.CompileWith(emitter) = emitter.EmitSelect(ir)
 
-type DeleteQuery<'T>(query: SqlKata.Query) = 
+type DeleteQuery<'T>(ir: DeleteQueryIR) =
     inherit SelectQuery()
-    member this.KataQuery = query
-    override this.ToKataQuery() = query
+    member this.IR = ir
+    override this.SelectIR = { SelectQueryIR.empty with From = Some ir.Table; Where = ir.Where }
+    override this.CompileWith(emitter) = emitter.EmitDelete(ir)
 
 type UpdateQuery<'T, 'UpdateReturn>(spec: UpdateQuerySpec<'T, 'UpdateReturn>) =
-    inherit SelectQuery()
     member this.Spec = spec
-    member this.KataQuery = spec |> KataUtils.fromUpdate
-    override this.ToKataQuery() = this.KataQuery
 
 type InsertQuery<'T, 'Identity>(spec: InsertQuerySpec<'T, 'Identity>) =
-    inherit SelectQuery()
     member this.Spec = spec
-    member this.KataQuery = spec |> KataUtils.fromInsert
-    override this.ToKataQuery() = this.KataQuery

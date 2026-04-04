@@ -1,31 +1,30 @@
-﻿/// Linq delete query builders
+/// Linq delete query builders
 [<AutoOpen>]
 module SqlHydra.Query.DeleteBuilders
 
 open System.Threading
-open SqlKata
 
-let private prepareDeleteQuery<'Deleted> (query: Query) = 
-    DeleteQuery<'Deleted>(query.AsDelete())
+let private prepareDeleteQuery<'Deleted> (ir: SelectQueryIR) =
+    DeleteQuery<'Deleted>({ Table = ir.From |> Option.defaultValue ""; Where = ir.Where })
 
 /// The base delete builder that contains all common operations
 type DeleteBuilder<'Deleted>() =
 
     let getQueryOrDefault (state: QuerySource<'T>) =
         match state with
-        | :? QuerySource<'T, Query> as qs -> qs.Query
-        | _ -> Query()
+        | :? QuerySource<'T, SelectQueryIR> as qs -> qs.Query
+        | _ -> SelectQueryIR.empty
 
     member val CancellationToken = CancellationToken.None with get, set
 
     member this.For (state: QuerySource<'T>, [<ReflectedDefinition>] forExpr: FSharp.Quotations.Expr<'T -> QuerySource<'T>>) =
-        let query = state |> getQueryOrDefault
+        let ir = state |> getQueryOrDefault
         let tableAlias = QuotationVisitor.visitFor forExpr |> QuotationVisitor.allowUnderscore true
         let tblMaybe, tableMappings = TableMappings.tryGetByRootOrAlias tableAlias state.TableMappings
         let tbl = tblMaybe |> Option.get
 
-        QuerySource<'T, Query>(
-            query.From($"{tbl.Schema}.{tbl.Name}"), 
+        QuerySource<'T, SelectQueryIR>(
+            { ir with From = Some $"{tbl.Schema}.{tbl.Name}" },
             tableMappings)
 
     member this.Yield _ =
@@ -33,20 +32,20 @@ type DeleteBuilder<'Deleted>() =
 
     /// Sets the WHERE condition
     [<CustomOperation("where", MaintainsVariableSpace = true)>]
-    member this.Where (state:QuerySource<'T>, [<ProjectionParameter>] whereExpression) = 
-        let query = state |> getQueryOrDefault
+    member this.Where (state:QuerySource<'T>, [<ProjectionParameter>] whereExpression) =
+        let ir = state |> getQueryOrDefault
         let tableMappings = state.TableMappings |> Map.values
-        let where = LinqExpressionVisitors.visitWhere<'T> tableMappings whereExpression (FQ.fullyQualifyColumn state.TableMappings)
-        QuerySource<'T, Query>(query.Where(fun w -> where), state.TableMappings)
+        let newClause = LinqExpressionVisitors.visitWhere<'T> tableMappings whereExpression (FQ.fullyQualifyColumn state.TableMappings)
+        QuerySource<'T, SelectQueryIR>({ ir with Where = WhereClause.combineAnd ir.Where newClause }, state.TableMappings)
 
     /// Deletes all records in the table (only when there are is no where clause)
     [<CustomOperation("deleteAll", MaintainsVariableSpace = true)>]
-    member this.DeleteAll (state:QuerySource<'T>) = 
-        state :?> QuerySource<'T, Query>
+    member this.DeleteAll (state:QuerySource<'T>) =
+        state :?> QuerySource<'T, SelectQueryIR>
 
     /// Sets a CancellationToken for the query execution.
     [<CustomOperation("cancel", MaintainsVariableSpace = true)>]
-    member this.Cancel (state: QuerySource<'T, Query>, cancellationToken: CancellationToken) =
+    member this.Cancel (state: QuerySource<'T, SelectQueryIR>, cancellationToken: CancellationToken) =
         this.CancellationToken <- cancellationToken
         state
 
@@ -61,7 +60,7 @@ type DeleteBuilder<'Deleted>() =
 type DeleteAsyncBuilder<'Deleted>(ct: ContextType) =
     inherit DeleteBuilder<'Deleted>()
 
-    member this.Run (state: QuerySource<'Deleted, Query>) = 
+    member this.Run (state: QuerySource<'Deleted, SelectQueryIR>) =
         async {
             let deleteQuery = state.Query |> prepareDeleteQuery
             let! ctx = ContextUtils.getContext ct |> Async.AwaitTask
@@ -70,7 +69,7 @@ type DeleteAsyncBuilder<'Deleted>(ct: ContextType) =
                 let cancel = if this.CancellationToken <> CancellationToken.None then this.CancellationToken else asyncCancel
                 let! result = ctx.DeleteAsyncWithOptions (deleteQuery, cancel) |> Async.AwaitTask
                 return result
-            finally 
+            finally
                 ContextUtils.disposeIfNotShared ct ctx
         }
 
@@ -79,7 +78,7 @@ type DeleteAsyncBuilder<'Deleted>(ct: ContextType) =
 type DeleteTaskBuilder<'Deleted>(ct: ContextType) =
     inherit DeleteBuilder<'Deleted>()
 
-    member this.Run (state: QuerySource<'Deleted, Query>) =
+    member this.Run (state: QuerySource<'Deleted, SelectQueryIR>) =
         task {
             let deleteQuery = state.Query |> prepareDeleteQuery
             let! ctx = ContextUtils.getContext ct
@@ -89,9 +88,9 @@ type DeleteTaskBuilder<'Deleted>(ct: ContextType) =
             finally
                 ContextUtils.disposeIfNotShared ct ctx
         }
-    
+
 /// Builds and returns a delete query that can be manually run by piping into QueryContext delete methods
-let delete<'Deleted> = 
+let delete<'Deleted> =
     DeleteBuilder<'Deleted>()
 
 /// Builds and returns a delete query that returns an Async result
@@ -107,5 +106,4 @@ let inline deleteTask< ^Deleted, ^Context
     (ctSource: ^Context) =
     let ct = ContextTypeResolver.resolve ctSource
     DeleteTaskBuilder< ^Deleted>(ct)
-    
-    
+

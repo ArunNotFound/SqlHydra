@@ -186,6 +186,6 @@ type ISqlHydraDbProvider =
     abstract member Type: ProviderType
     abstract member DefaultReaderType: string
     abstract member DefaultProvider: string
-    abstract member SqlKataCompiler: string
+    abstract member SqlEmitter: string
     abstract member ProviderConnectionType: string
     abstract member GetSchema: cfg: Config * isLegacy: bool * extensions: IExtendTypeMapping list -> Schema

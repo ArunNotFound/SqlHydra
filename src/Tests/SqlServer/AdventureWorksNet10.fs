@@ -1393,7 +1393,7 @@ type QueryContextFactory =
         member this.OpenContextAsync() = this.OpenContextAsync()
 
     static member Create(connectionString: string, ?sqlLogger) =
-        let compiler = SqlKata.Compilers.SqlServerCompiler()
+        let emitter = SqlHydra.Query.SqlServerEmitter()
 
         let createConn () : System.Data.Common.DbConnection =
             new Microsoft.Data.SqlClient.SqlConnection(connectionString)
@@ -1401,7 +1401,7 @@ type QueryContextFactory =
         let openContext () =
             let conn = createConn ()
             conn.Open()
-            let ctx = new QueryContext(conn, compiler)
+            let ctx = new QueryContext(conn, emitter)
             sqlLogger |> Option.iter (fun logger -> ctx.Logger <- logger)
             ctx
 
@@ -1409,7 +1409,7 @@ type QueryContextFactory =
             task {
                 let conn = createConn ()
                 do! conn.OpenAsync()
-                let ctx = new QueryContext(conn, compiler)
+                let ctx = new QueryContext(conn, emitter)
                 sqlLogger |> Option.iter (fun logger -> ctx.Logger <- logger)
                 return ctx
             }

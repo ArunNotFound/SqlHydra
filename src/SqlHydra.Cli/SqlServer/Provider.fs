@@ -9,7 +9,7 @@ let instance: ISqlHydraDbProvider =
         member _.Type = SqlServer
         member _.DefaultReaderType = "Microsoft.Data.SqlClient.SqlDataReader"
         member _.DefaultProvider = "Microsoft.Data.SqlClient"
-        member _.SqlKataCompiler = "SqlKata.Compilers.SqlServerCompiler()"
+        member _.SqlEmitter = "SqlHydra.Query.SqlServerEmitter()"
         member _.ProviderConnectionType = "Microsoft.Data.SqlClient.SqlConnection"
         member _.GetSchema(cfg, isLegacy, extensions) = SqlServerSchemaProvider.getSchema(cfg, isLegacy, extensions)
     }

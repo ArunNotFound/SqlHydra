@@ -435,8 +435,8 @@ let ``DateOnly round-trip in SQLite``() = task {
     use cmd = conn.CreateCommand(CommandText = "CREATE TABLE [dbo].[DateOnlyTest] (date TEXT NOT NULL)")
     cmd.ExecuteNonQuery() |> ignore
 
-    let compiler = SqlKata.Compilers.SqliteCompiler()
-    use ctx = new QueryContext(conn, compiler)
+    let emitter = SqlHydra.Query.SqliteEmitter()
+    use ctx = new QueryContext(conn, emitter)
 
     let expected = System.DateOnly(2024, 6, 20)
 

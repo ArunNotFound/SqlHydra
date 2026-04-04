@@ -296,7 +296,7 @@ let ``Update Query with Where``() =
             set c.personid (Some 123)
             where (c.personid = Some 456)
         }
-        |> toSql
+        |> toUpdateSql
 
     sql =! "UPDATE \"sales\".\"customer\" SET \"personid\" = @p0 WHERE (\"sales\".\"customer\".\"personid\" = @p1)"
 
@@ -309,7 +309,7 @@ let ``Update Query with multiple Wheres``() =
             where (c.personid = Some 456)
             where (c.customerid = 789)
         }
-        |> toSql
+        |> toUpdateSql
 
     sql =! """UPDATE "sales"."customer" SET "personid" = @p0 WHERE ("sales"."customer"."personid" = @p1 AND ("sales"."customer"."customerid" = @p2))"""
 
@@ -321,7 +321,7 @@ let ``Update Query with No Where``() =
             set c.customerid 123
             updateAll
         }
-        |> toSql
+        |> toUpdateSql
 
     sql =! "UPDATE \"sales\".\"customer\" SET \"customerid\" = @p0"
 
@@ -388,8 +388,8 @@ let ``Insert Query``() =
     let sql =  
         insert {
             into sales.customer
-            entity 
-                { 
+            entity
+                {
                     sales.customer.modifieddate = System.DateTime.Today
                     sales.customer.territoryid = None
                     sales.customer.storeid = None
@@ -398,7 +398,7 @@ let ``Insert Query``() =
                     sales.customer.customerid = 0
                 }
         }
-        |> toSql
+        |> toInsertSql
 
     sql =! "INSERT INTO \"sales\".\"customer\" (\"customerid\", \"personid\", \"storeid\", \"territoryid\", \"rowguid\", \"modifieddate\") VALUES (@p0, @p1, @p2, @p3, @p4, @p5)" 
 

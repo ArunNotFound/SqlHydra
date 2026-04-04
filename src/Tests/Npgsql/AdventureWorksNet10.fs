@@ -3235,20 +3235,20 @@ type QueryContextFactory =
         QueryContextFactory.Create(Npgsql.NpgsqlDataSource.Create(connectionString), ?sqlLogger = sqlLogger)
 
     static member Create(dataSource: Npgsql.NpgsqlDataSource, ?sqlLogger) =
-        let compiler = SqlKata.Compilers.PostgresCompiler()
+        let emitter = SqlHydra.Query.PostgresEmitter()
 
         let createConn () : System.Data.Common.DbConnection = dataSource.OpenConnection()
 
         let openContext () =
             let conn = createConn ()
-            let ctx = new QueryContext(conn, compiler)
+            let ctx = new QueryContext(conn, emitter)
             sqlLogger |> Option.iter (fun logger -> ctx.Logger <- logger)
             ctx
 
         let openContextAsync () =
             task {
                 let! conn = dataSource.OpenConnectionAsync()
-                let ctx = new QueryContext(conn, compiler)
+                let ctx = new QueryContext(conn, emitter)
                 sqlLogger |> Option.iter (fun logger -> ctx.Logger <- logger)
                 return ctx
             }

@@ -3,7 +3,6 @@ namespace SqlHydra.Query
 open System
 open System.Data.Common
 open System.Threading
-open SqlKata
 open SqlHydra.Domain
 
 /// Indicates which execution strategy to use after command preparation.
@@ -14,23 +13,16 @@ type private InsertExecMode =
     | ExecOutputClause of OutputField list
 
 /// Contains methods that compile and read a query.
-type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
-    
-    let provider =
-        match compiler with
-        | :? SqlKata.Compilers.SqlServerCompiler -> SqlServer
-        | :? SqlKata.Compilers.PostgresCompiler -> Npgsql
-        | :? SqlKata.Compilers.MySqlCompiler -> MySql
-        | :? SqlKata.Compilers.SqliteCompiler -> Sqlite
-        | :? SqlKata.Compilers.OracleCompiler -> Oracle
-        | _ -> failwith $"Unsupported compiler type: {compiler.GetType().FullName}"
+type QueryContext(conn: DbConnection, emitter: ISqlEmitter) =
+
+    let provider = emitter.Provider
 
     let setProviderDbType (param: DbParameter) (propertyName: string) (providerDbType: string) =
         let property = param.GetType().GetProperty(propertyName)
         let dbTypeSetter = property.GetSetMethod()
         let value = Enum.Parse(property.PropertyType, providerDbType)
         dbTypeSetter.Invoke(param, [|value|]) |> ignore
-        
+
     let setParameterDbType (param: DbParameter) (qp: QueryParameter) =
         match provider, qp.ProviderDbType with
         | Npgsql, Some type' ->
@@ -55,14 +47,14 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
         p :> Data.IDbDataParameter
 
 
-    let mutable logger = fun (r: SqlResult) -> ()
-        
+    let mutable logger = fun (cq: CompiledQuery) -> ()
+
     interface IDisposable with
-        member this.Dispose() = 
+        member this.Dispose() =
             conn.Dispose()
             this.Transaction |> Option.iter (fun t -> t.Dispose())
             this.Transaction <- None
-    
+
 #if NETSTANDARD2_1_OR_GREATER
     interface IAsyncDisposable with
         member this.DisposeAsync() =
@@ -74,27 +66,21 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
                 this.Transaction <- None
             } |> ValueTask
 #endif
-    
+
     member this.Connection = conn
-    member this.Compiler = compiler
+    member this.Emitter = emitter
     member this.Provider = provider
 
-    /// Logs a SqlKata compiled query with a user provided log function.
+    /// Logs a compiled query with a user provided log function.
     /// Ex: queryContext.Logger <- printfn "SQL: %O"
     member this.Logger
         with get () = logger
-        // Wrap the SqlResult to override query logging
-        and set fn = logger <- LoggedSqlResult >> unbox<SqlResult> >> fn
-
-    /// Updates the SqlResult with the latest cmd.CommandText and then logs the query.
-    member private this.LogCommand (sqlResult: SqlResult, cmd: DbCommand) = 
-        sqlResult.Sql <- cmd.CommandText
-        this.Logger sqlResult
+        and set fn = logger <- fn
 
     member val Transaction : DbTransaction option = None with get,set
 
     member this.BeginTransaction(?isolationLevel: Data.IsolationLevel) =
-        this.Transaction <- 
+        this.Transaction <-
             match isolationLevel with
             | Some il -> conn.BeginTransaction(il) |> Some
             | None -> conn.BeginTransaction() |> Some
@@ -109,14 +95,14 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
         this.Transaction <- Some trans
     }
 #endif
-    
+
     member this.CommitTransaction() =
         match this.Transaction with
         | Some t -> t.Commit(); this.Transaction <- None
         | None -> failwith "No transaction was started."
-        
+
 #if NETSTANDARD2_1_OR_GREATER
-    member this.CommitTransactionAsync(?cancellationToken: CancellationToken) = task { 
+    member this.CommitTransactionAsync(?cancellationToken: CancellationToken) = task {
         match this.Transaction with
         | Some t ->
             do! t.CommitAsync(?cancellationToken = cancellationToken)
@@ -129,7 +115,7 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
         match this.Transaction with
         | Some t -> t.Rollback(); this.Transaction <- None
         | None -> failwith "No transaction was started."
-        
+
 #if NETSTANDARD2_1_OR_GREATER
     member this.RollbackTransactionAsync(?cancellationToken: CancellationToken) = task {
         match this.Transaction with
@@ -143,72 +129,42 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
     member private this.TrySetTransaction(cmd: DbCommand) =
         this.Transaction |> Option.iter (fun t -> cmd.Transaction <- t)
 
-    /// Builds a DbCommand with CommandText and Parameters from a SqlKata compiled query.
-    member this.BuildCommand(compiledQuery: SqlResult, ?log: bool) = 
+    /// Builds a DbCommand from a CompiledQuery.
+    member this.BuildCommandFromCompiled(compiled: CompiledQuery, ?log: bool) =
         let log = defaultArg log true
-        if log then this.Logger compiledQuery
+        if log then this.Logger compiled
         let cmd = conn.CreateCommand()
         cmd |> this.TrySetTransaction
-        cmd.CommandText <- compiledQuery.Sql
-        for kvp in compiledQuery.NamedBindings do
-            cmd.Parameters.Add(createParam cmd kvp.Key kvp.Value) |> ignore
+        cmd.CommandText <- compiled.Sql
+        for (name, value) in compiled.Parameters do
+            cmd.Parameters.Add(createParam cmd name value) |> ignore
         cmd
 
-    /// Builds an ADO.NET DbCommand from a SqlKata query.
-    member this.BuildCommand(query: Query) =
-        let compiledQuery = compiler.Compile(query)
-        this.BuildCommand(compiledQuery)
+    /// Builds an ADO.NET DbCommand from a SelectQueryIR.
+    member this.BuildCommand(ir: SelectQueryIR) =
+        let compiled = emitter.EmitSelect(ir)
+        this.BuildCommandFromCompiled(compiled)
 
     /// Returns an ADO.NET data reader for a given query.
-    member this.GetReader<'T, 'Reader & #DbDataReader> (query: SelectQuery<'T>) = 
-        let cmd = this.BuildCommand(query.ToKataQuery()) // do not dispose cmd
+    member this.GetReader<'T, 'Reader & #DbDataReader> (query: SelectQuery<'T>) =
+        let cmd = this.BuildCommand(query.IR) // do not dispose cmd
         cmd.ExecuteReader() :?> 'Reader
 
     /// Returns an ADO.NET data reader for a given query.
-    member this.GetReaderAsync<'T, 'Reader & #DbDataReader> (query: SelectQuery<'T>) = 
+    member this.GetReaderAsync<'T, 'Reader & #DbDataReader> (query: SelectQuery<'T>) =
         this.GetReaderAsyncWithOptions<'T, 'Reader>(query)
 
     /// Returns an ADO.NET data reader for a given query.
-    member this.GetReaderAsyncWithOptions<'T, 'Reader & #DbDataReader> (query: SelectQuery<'T>, ?cancel: CancellationToken) = 
+    member this.GetReaderAsyncWithOptions<'T, 'Reader & #DbDataReader> (query: SelectQuery<'T>, ?cancel: CancellationToken) =
         task { // Must wrap in task to prevent `EndExecuteNonQuery` ex in NET6_0_OR_GREATER
-            let cmd = this.BuildCommand(query.ToKataQuery()) // do not dispose cmd
+            let cmd = this.BuildCommand(query.IR) // do not dispose cmd
             let! reader = cmd.ExecuteReaderAsync(cancel |> Option.defaultValue CancellationToken.None)
             return reader :?> 'Reader
         }
 
-    /// Executes a select query with a given readEntity builder function.
-    [<System.Obsolete("This method will be removed in v4.0. Please use Select instead.")>]
-    member this.Read<'Entity, 'Reader & #DbDataReader> (readEntityBuilder: 'Reader -> (unit -> 'Entity)) (query: SelectQuery<'Entity>) =
-        this.Select<'Entity>(query)
-
-    /// Executes a select query with a given readEntity builder function.
-    [<System.Obsolete("This method will be removed in v4.0. Please use SelectAsync instead.")>]
-    member this.ReadAsync<'Entity, 'Reader & #DbDataReader> (readEntityBuilder: 'Reader -> (unit -> 'Entity)) (query: SelectQuery<'Entity>) = 
-        this.SelectAsync<'Entity>(query)
-
-    /// Executes a select query with a given readEntity builder function and optional args.
-    [<System.Obsolete("This method will be removed in v4.0. Please use SelectAsyncWithOptions instead.")>]
-    member this.ReadAsyncWithOptions<'Entity, 'Reader & #DbDataReader>(query: SelectQuery<'Entity>, readEntityBuilder: 'Reader -> (unit -> 'Entity), ?cancel: CancellationToken) = 
-        this.SelectAsyncWithOptions<'Entity>(query, ?cancel = cancel)
-
-    /// Executes a select query with a given readEntity builder function for a single (option) result.
-    [<System.Obsolete("This method will be removed in v4.0. Please use SelectOne instead.")>]
-    member this.ReadOne<'Entity, 'Reader & #DbDataReader> (readEntityBuilder: 'Reader -> (unit -> 'Entity)) (query: SelectQuery<'Entity>) =
-        this.SelectOne<'Entity>(query)
-
-    /// Executes a select query with a given readEntity builder function for a single (option) result.
-    [<System.Obsolete("This method will be removed in v4.0. Please use SelectOneAsync instead.")>]
-    member this.ReadOneAsync<'Entity, 'Reader & #DbDataReader> (readEntityBuilder: 'Reader -> (unit -> 'Entity)) (query: SelectQuery<'Entity>) = 
-        this.SelectOneAsync<'Entity>(query)
-
-    /// Executes a select query with a given readEntity builder function for a single (option) result with optional args.
-    [<System.Obsolete("This method will be removed in v4.0. Please use SelectOneAsyncWithOptions instead.")>]
-    member this.ReadOneAsyncWithOptions<'Entity, 'Reader & #DbDataReader>(query: SelectQuery<'Entity>, readEntityBuilder: 'Reader -> (unit -> 'Entity), ?cancel: CancellationToken) = 
-        this.SelectOneAsyncWithOptions<'Entity>(query, ?cancel = cancel)
-
     /// Executes a select query and returns results using the Hydration module.
     member this.Select<'Entity> (query: SelectQuery<'Entity>) =
-        use cmd = this.BuildCommand(query.ToKataQuery())
+        use cmd = this.BuildCommand(query.IR)
         use reader = cmd.ExecuteReader()
         let readEntity = Hydration.buildRowReader<'Entity> this.Provider reader
         seq [|
@@ -224,7 +180,7 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
     member this.SelectAsyncWithOptions<'Entity>(query: SelectQuery<'Entity>, ?cancel: CancellationToken) =
         task { // Must wrap in task to prevent `EndExecuteNonQuery` ex in NET6_0_OR_GREATER
             let cancel = defaultArg cancel CancellationToken.None
-            use cmd = this.BuildCommand (query.ToKataQuery())
+            use cmd = this.BuildCommand(query.IR)
             use! reader = cmd.ExecuteReaderAsync(cancel)
             let readEntity = Hydration.buildRowReader<'Entity> this.Provider reader
             let results = ResizeArray<'Entity>()
@@ -254,13 +210,52 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
             return entities |> Seq.tryHead
         }
 
-    /// Prepares a DbCommand for an insert query, applying all SQL modifications (conflict handling, identity fixes, etc.)
+    /// Reads output values from a DbCommand execution (for OUTPUT clause support).
+    member private _.ReadOutputValues<'InsertReturn> (cmd: DbCommand) (cancel: CancellationToken) (outputFields: OutputField list) =
+        task {
+            use! reader = cmd.ExecuteReaderAsync(cancel)
+            let! _ = reader.ReadAsync(cancel)
+
+            let outputValues =
+                outputFields
+                |> List.map (fun f ->
+                    let ord = reader.GetOrdinal(f.ColumnName)
+                    match f.Nullability with
+                    | NotNullable ->
+                        reader[ord]
+                    | IsOptional ->
+                        if reader.IsDBNull(ord)
+                        then None
+                        else Activator.CreateInstance(f.PropertyType, [| reader[ord] |])
+                    | IsNullable ->
+                        if reader.IsDBNull(ord)
+                        then Nullable() |> box
+                        else Activator.CreateInstance(f.PropertyType, [| reader[ord] |])
+                )
+                |> List.toArray
+
+            let outputTypes =
+                outputFields
+                |> List.map _.PropertyType
+                |> List.toArray
+
+            match outputValues with
+            | [| outputValue |] ->
+                return outputValue :?> 'InsertReturn
+            | outputValues ->
+                // Convert array to a tuple
+                let outputTupleType = FSharp.Reflection.FSharpType.MakeTupleType(outputTypes)
+                let outputTuple = FSharp.Reflection.FSharpValue.MakeTuple(outputValues, outputTupleType)
+                return outputTuple :?> 'InsertReturn
+        }
+
+    /// Prepares a DbCommand for an insert query, applying all SQL modifications.
     /// Returns the prepared command and an InsertExecMode indicating how to execute it.
     member private this.PrepareInsertCommand<'T, 'InsertReturn> (iq: InsertQuery<'T, 'InsertReturn>) =
-        let compiledQuery = iq.ToKataQuery() |> compiler.Compile
-        let cmd = this.BuildCommand(compiledQuery, log = false) // We will log manually below to capture query changes
-
         KataUtils.failIfIdentityOnConflict iq.Spec
+        let insertIR = KataUtils.fromInsert iq.Spec
+        let compiled = emitter.EmitInsert(insertIR)
+        let cmd = this.BuildCommandFromCompiled(compiled, log = false)
 
         // Handle InsertOrUpdateOnUnique separately (SQL Server TRY/CATCH pattern)
         match iq.Spec.InsertType with
@@ -274,37 +269,17 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
             cmd.CommandText <- newSql
             cmd.Parameters.Clear()
             for p in allParams do cmd.Parameters.Add(p) |> ignore
-            this.LogCommand(compiledQuery, cmd)
+            this.Logger { Sql = cmd.CommandText; Parameters = [] }
             cmd, ExecNonQuery
         | _ ->
 
-        // Applies on conflict modifier if in spec
-        let applyOnConflict =
-            match iq.Spec.InsertType with
-            | InsertOrReplace -> OnConflict.insertOrReplace
-            | OnConflictDoUpdate (conflictFields, updateFields) -> OnConflict.onConflictDoUpdate conflictFields updateFields
-            | OnConflictDoNothing conflictFields -> OnConflict.onConflictDoNothing conflictFields
-            | Insert -> id
-            | InsertOrUpdateOnUnique _ -> id // handled above
-
         match iq.Spec with
         | { IdentityField = Some identityField } ->
-            // Try apply on conflict
-            cmd.CommandText <- cmd.CommandText |> applyOnConflict
+            // Fix mssql guid identity: need OUTPUT clause instead of scope_identity()
+            if provider = SqlServer && typeof<'InsertReturn> = typeof<System.Guid> then
+                cmd.CommandText <- Fixes.MsSql.fixGuidIdentityQuery identityField cmd.CommandText
 
-            // Fix postgres identity
-            if provider = Npgsql
-            then cmd.CommandText <- cmd.CommandText |> Fixes.Postgres.fixIdentityQuery identityField
-
-            // Fix oracle identity
-            elif provider = Oracle
-            then cmd.CommandText <- cmd.CommandText |> Fixes.Oracle.fixIdentityQuery identityField
-
-            // Fix mssql guid identity
-            elif provider = SqlServer && typeof<'InsertReturn> = typeof<System.Guid>
-            then cmd.CommandText <- cmd.CommandText |> Fixes.MsSql.fixGuidIdentityQuery identityField
-
-            this.LogCommand(compiledQuery, cmd)
+            this.Logger { Sql = cmd.CommandText; Parameters = [] }
 
             // Setup Oracle identity output parameter
             if provider = Oracle then
@@ -318,28 +293,11 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
                 cmd, ExecScalar
 
         | { OutputFields = outputFields } when outputFields.Length > 0 ->
-            // Try apply on conflict
-            cmd.CommandText <- cmd.CommandText |> applyOnConflict
-
-            // Append SQL Server output clause
-            cmd.CommandText <- OutputClause.inserted outputFields cmd.CommandText
-
-            // Fix Oracle multi-insert query
-            if provider = Oracle && iq.Spec.Entities.Length > 1
-            then cmd.CommandText <- cmd.CommandText |> Fixes.Oracle.fixMultiInsertQuery
-
-            this.LogCommand(compiledQuery, cmd)
+            this.Logger { Sql = cmd.CommandText; Parameters = [] }
             cmd, ExecOutputClause outputFields
 
         | _ ->
-            // Try apply on conflict
-            cmd.CommandText <- cmd.CommandText |> applyOnConflict
-
-            // Fix Oracle multi-insert query
-            if provider = Oracle && iq.Spec.Entities.Length > 1
-            then cmd.CommandText <- cmd.CommandText |> Fixes.Oracle.fixMultiInsertQuery
-
-            this.LogCommand(compiledQuery, cmd)
+            this.Logger { Sql = cmd.CommandText; Parameters = [] }
             cmd, ExecNonQuery
 
     member this.Insert<'T, 'InsertReturn> (iq: InsertQuery<'T, 'InsertReturn>) =
@@ -356,7 +314,7 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
             let _ = cmd.ExecuteNonQuery()
             Convert.ChangeType(outputParam.Value, typeof<'InsertReturn>) :?> 'InsertReturn
         | ExecOutputClause outputFields ->
-            OutputClause.readValues<'InsertReturn> cmd CancellationToken.None outputFields
+            this.ReadOutputValues<'InsertReturn> cmd CancellationToken.None outputFields
             |> Async.AwaitTask |> Async.RunSynchronously
 
     member this.InsertAsync<'T, 'InsertReturn> (query: InsertQuery<'T, 'InsertReturn>) =
@@ -378,58 +336,64 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
                 let! _ = cmd.ExecuteNonQueryAsync(cancel)
                 return Convert.ChangeType(outputParam.Value, typeof<'InsertReturn>) :?> 'InsertReturn
             | ExecOutputClause outputFields ->
-                let! outputValues = OutputClause.readValues<'InsertReturn> cmd cancel outputFields
+                let! outputValues = this.ReadOutputValues<'InsertReturn> cmd cancel outputFields
                 return outputValues
         }
-    
-    member this.Update (query: UpdateQuery<'T, 'UpdateReturn>) = 
-        use cmd = this.BuildCommand(query.ToKataQuery())
+
+    member this.Update (query: UpdateQuery<'T, 'UpdateReturn>) =
+        let updateIR = KataUtils.fromUpdate query.Spec
+        let compiled = emitter.EmitUpdate(updateIR)
+        use cmd = this.BuildCommandFromCompiled(compiled)
         cmd.ExecuteNonQuery()
 
-    member this.UpdateAsync (query: UpdateQuery<'T, 'UpdateReturn>) = 
+    member this.UpdateAsync (query: UpdateQuery<'T, 'UpdateReturn>) =
         this.UpdateAsyncWithOptions(query)
-    
-    member this.UpdateAsyncWithOptions (query: UpdateQuery<'T, 'UpdateReturn>, ?cancel: CancellationToken) = 
+
+    member this.UpdateAsyncWithOptions (query: UpdateQuery<'T, 'UpdateReturn>, ?cancel: CancellationToken) =
         task { // Must wrap in task to prevent `EndExecuteNonQuery` ex in NET6_0_OR_GREATER
             let cancel = defaultArg cancel CancellationToken.None
+            let updateIR = KataUtils.fromUpdate query.Spec
 
-            use cmd = this.BuildCommand(query.ToKataQuery())
-            
-            if query.Spec.OutputFields.Length > 0 then 
-                // Append SQL Server output clause
-                cmd.CommandText <- OutputClause.updated query.Spec.OutputFields cmd.CommandText
-                let! outputValues = OutputClause.readValues<'UpdateReturn> cmd cancel query.Spec.OutputFields
-                return outputValues 
+            if query.Spec.OutputFields.Length > 0 then
+                // Emit update with output clause
+                let compiled = emitter.EmitUpdate(updateIR)
+                use cmd = this.BuildCommandFromCompiled(compiled)
+                let! outputValues = this.ReadOutputValues<'UpdateReturn> cmd cancel query.Spec.OutputFields
+                return outputValues
             else
+                let compiled = emitter.EmitUpdate(updateIR)
+                use cmd = this.BuildCommandFromCompiled(compiled)
                 let! rowsInserted = cmd.ExecuteNonQueryAsync(cancel)
                 return Convert.ChangeType(rowsInserted, typeof<'UpdateReturn>) :?> 'UpdateReturn
         }
 
-    member this.Delete (query: DeleteQuery<'T>) = 
-        use cmd = this.BuildCommand(query.ToKataQuery())
+    member this.Delete (query: DeleteQuery<'T>) =
+        let compiled = emitter.EmitDelete(query.IR)
+        use cmd = this.BuildCommandFromCompiled(compiled)
         cmd.ExecuteNonQuery()
 
-    member this.DeleteAsync (query: DeleteQuery<'T>) = 
+    member this.DeleteAsync (query: DeleteQuery<'T>) =
         this.DeleteAsyncWithOptions(query)
 
-    member this.DeleteAsyncWithOptions (query: DeleteQuery<'T>, ?cancel: CancellationToken) = 
+    member this.DeleteAsyncWithOptions (query: DeleteQuery<'T>, ?cancel: CancellationToken) =
         task { // Must wrap in task to prevent `EndExecuteNonQuery` ex in NET6_0_OR_GREATER
-            use cmd = this.BuildCommand(query.ToKataQuery())
+            let compiled = emitter.EmitDelete(query.IR)
+            use cmd = this.BuildCommandFromCompiled(compiled)
             return! cmd.ExecuteNonQueryAsync(cancel |> Option.defaultValue CancellationToken.None)
         }
 
-    member this.Count (query: SelectQuery<int>) = 
-        use cmd = this.BuildCommand(query.ToKataQuery())
+    member this.Count (query: SelectQuery<int>) =
+        use cmd = this.BuildCommand(query.IR)
         match cmd.ExecuteScalar() with
         | :? int64 as count -> Convert.ToInt32 count
         | _  as count -> count :?> int
 
-    member this.CountAsync (query: SelectQuery<int>) = 
+    member this.CountAsync (query: SelectQuery<int>) =
         this.CountAsyncWithOptions(query)
 
-    member this.CountAsyncWithOptions (query: SelectQuery<int>, ?cancel: CancellationToken) = 
+    member this.CountAsyncWithOptions (query: SelectQuery<int>, ?cancel: CancellationToken) =
         task { // Must wrap in task to prevent `EndExecuteNonQuery` ex in NET6_0_OR_GREATER
-            use cmd = this.BuildCommand(query.ToKataQuery())
+            use cmd = this.BuildCommand(query.IR)
             match! cmd.ExecuteScalarAsync(cancel |> Option.defaultValue CancellationToken.None) with
             | :? int64 as count -> return Convert.ToInt32 count
             | count -> return count :?> int
