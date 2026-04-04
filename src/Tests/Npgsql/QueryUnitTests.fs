@@ -412,3 +412,187 @@ let ``Inline Aggregates``() =
         |> toSql
 
     sql =! "SELECT COUNT(\"o\".\"salesorderid\") AS __hydra_expr_0 FROM \"sales\".\"salesorderheader\" AS \"o\"".RemoveHydraExpr()
+
+// ==========================================
+// Issue #125 bug verification tests
+// ==========================================
+
+// Bug 1: where (s = None) after leftJoin' should produce IS NULL
+[<Test>]
+let ``Issue125-01 Where joined table = None produces IS NULL``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            leftJoin' d in sales.salesorderdetail; on' (d.Value.salesorderid = o.salesorderid)
+            where (d = None)
+            select o
+        }
+        |> toSql
+
+    sql.Contains("IS NULL") =! true
+
+// Bug 2: where (s <> None) after leftJoin' should produce IS NOT NULL
+[<Test>]
+let ``Issue125-02 Where joined table <> None produces IS NOT NULL``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            leftJoin' d in sales.salesorderdetail; on' (d.Value.salesorderid = o.salesorderid)
+            where (d <> None)
+            select o
+        }
+        |> toSql
+
+    sql.Contains("IS NOT NULL") =! true
+
+// Bug 3: 2nd+ join should not throw NotImplementedException
+[<Test>]
+let ``Issue125-03 Multiple inner joins``() =
+    let sql =
+        select {
+            for p in production.product do
+            join sc in production.productsubcategory on (p.productsubcategoryid = Some sc.productsubcategoryid)
+            join c in production.productcategory on (sc.productcategoryid = c.productcategoryid)
+            select (p.name, sc.name, c.name)
+        }
+        |> toSql
+
+    sql.Contains("INNER JOIN") =! true
+    sql.Contains("\"production\".\"productsubcategory\"") =! true
+    sql.Contains("\"production\".\"productcategory\"") =! true
+
+// Bug 4: where on outer table after leftJoin' should work
+[<Test>]
+let ``Issue125-04 Where on outer table after leftJoin``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            leftJoin' d in sales.salesorderdetail; on' (d.Value.salesorderid = o.salesorderid)
+            where (o.onlineorderflag = true)
+            select (o, d)
+        }
+        |> toSql
+
+    sql.Contains("LEFT JOIN") =! true
+    sql.Contains("\"o\".\"onlineorderflag\" = @p") =! true
+
+// Bug 5: select of whole table after multi-join should work
+[<Test>]
+let ``Issue125-05 Select whole table after multi-join``() =
+    let sql =
+        select {
+            for p in production.product do
+            join sc in production.productsubcategory on (p.productsubcategoryid = Some sc.productsubcategoryid)
+            join c in production.productcategory on (sc.productcategoryid = c.productcategoryid)
+            select p
+        }
+        |> toSql
+
+    sql.Contains("INNER JOIN") =! true
+    sql.Contains("\"p\".*") =! true
+
+// Bug 6: orderBy after multi-join should work
+[<Test>]
+let ``Issue125-06 OrderBy after multi-join``() =
+    let sql =
+        select {
+            for p in production.product do
+            join sc in production.productsubcategory on (p.productsubcategoryid = Some sc.productsubcategoryid)
+            join c in production.productcategory on (sc.productcategoryid = c.productcategoryid)
+            orderBy p.name
+            select p
+        }
+        |> toSql
+
+    sql.Contains("ORDER BY \"p\".\"name\"") =! true
+
+// Bug 7: groupBy after leftJoin' should work
+[<Test>]
+let ``Issue125-07 GroupBy after leftJoin``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            leftJoin' d in sales.salesorderdetail; on' (d.Value.salesorderid = o.salesorderid)
+            groupBy o.customerid
+            select o.customerid
+        }
+        |> toSql
+
+    sql.Contains("GROUP BY \"o\".\"customerid\"") =! true
+
+// Bug 8: compound where predicate across joined tables
+[<Test>]
+let ``Issue125-08 Compound where predicate across joined tables``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            join d in sales.salesorderdetail on (o.salesorderid = d.salesorderid)
+            where (o.onlineorderflag = true && d.unitprice > 100m)
+            select o
+        }
+        |> toSql
+
+    sql.Contains("\"o\".\"onlineorderflag\"") =! true
+    sql.Contains("\"d\".\"unitprice\"") =! true
+
+// Bug 9: OR in where clause with bool column after join
+[<Test>]
+let ``Issue125-09 Or where with bool column after join``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            leftJoin' d in sales.salesorderdetail; on' (d.Value.salesorderid = o.salesorderid)
+            where (o.onlineorderflag = true || o.freight > 10m)
+            select o
+        }
+        |> toSql
+
+    sql.Contains("OR") =! true
+    sql.Contains("\"o\".\"onlineorderflag\"") =! true
+    sql.Contains("\"o\".\"freight\"") =! true
+
+// Bug 10: where with external variable after join
+[<Test>]
+let ``Issue125-10 Where with captured variable after join``() =
+    let minFreight = 50m
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            leftJoin' d in sales.salesorderdetail; on' (d.Value.salesorderid = o.salesorderid)
+            where (o.freight > minFreight)
+            select o
+        }
+        |> toSql
+
+    sql.Contains("\"o\".\"freight\" > @p") =! true
+
+// Bug 13: having after join should work
+[<Test>]
+let ``Issue125-13 Having after join``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            join d in sales.salesorderdetail on (o.salesorderid = d.salesorderid)
+            groupBy o.salesorderid
+            having (countBy d.salesorderdetailid > 0)
+            select o.salesorderid
+        }
+        |> toSql
+
+    sql.Contains("HAVING") =! true
+    sql.Contains("COUNT") =! true
+
+// Bug 14: orderBy with aggregate after multi-join
+[<Test>]
+let ``Issue125-14 OrderBy with aggregate after join``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            join d in sales.salesorderdetail on (o.salesorderid = d.salesorderid)
+            groupBy o.salesorderid
+            orderBy (sumBy d.unitprice)
+            select o.salesorderid
+        }
+        |> toSql
+
+    sql.Contains("ORDER BY SUM(\"d\".\"unitprice\")") =! true
