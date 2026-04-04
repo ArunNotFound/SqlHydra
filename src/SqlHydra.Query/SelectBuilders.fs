@@ -111,6 +111,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
 
     member val MapFn = Option<Func<'Selected, 'Mapped>>.None with get, set
     member val CancellationToken = CancellationToken.None with get, set
+    member val private PendingJoinInfo = Option<PendingJoin>.None with get, set
 
     member this.For (state: QuerySource<'T>, [<ReflectedDefinition>] forExpr: FSharp.Quotations.Expr<'T -> QuerySource<'T>>) =
         let tableAlias = QuotationVisitor.visitFor forExpr
@@ -201,7 +202,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
                     let fqCol = $"%s{tableAlias}.%s{p.Name}"
                     [OrderByColumn (fqCol, Asc)]
                 | LinqExpressionVisitors.OrderByAggregateColumn (aggType, tableAlias, p) ->
-                    let fqCol = $"[%s{tableAlias}].[%s{p.Name}]"
+                    let fqCol = $"{{%s{tableAlias}}}.{{%s{p.Name}}}"
                     [OrderByRaw $"%s{aggType}(%s{fqCol})"]
                 | LinqExpressionVisitors.OrderByIgnored ->
                     []
@@ -223,7 +224,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
                     let fqCol = $"%s{tableAlias}.%s{p.Name}"
                     [OrderByColumn (fqCol, Desc)]
                 | LinqExpressionVisitors.OrderByAggregateColumn (aggType, tableAlias, p) ->
-                    let fqCol = $"[%s{tableAlias}].[%s{p.Name}]"
+                    let fqCol = $"{{%s{tableAlias}}}.{{%s{p.Name}}}"
                     [OrderByRaw $"%s{aggType}(%s{fqCol}) DESC"]
                 | LinqExpressionVisitors.OrderByIgnored ->
                     []
@@ -285,7 +286,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
             List.zip outerProperties innerProperties
             |> List.fold (fun (acc: WhereClause) (outerProp, innerProp) ->
                 let cond = CompareColumns($"%s{outerProp.Alias}.%s{outerProp.Member.Name}", Eq, $"%s{innerProp.Alias}.%s{innerProp.Member.Name}")
-                WhereClause.combineAnd acc cond
+                WhereClause.combineAndFlat acc cond
             ) WhereClause.Empty
 
         let joinClause = { Kind = InnerJoin; Table = innerTableNameAsAlias; Condition = joinCondition }
@@ -332,7 +333,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
             List.zip outerProperties innerProperties
             |> List.fold (fun (acc: WhereClause) (outerProp, innerProp) ->
                 let cond = CompareColumns($"%s{outerProp.Alias}.%s{outerProp.Member.Name}", Eq, $"%s{innerProp.Alias}.%s{innerProp.Member.Name}")
-                WhereClause.combineAnd acc cond
+                WhereClause.combineAndFlat acc cond
             ) WhereClause.Empty
 
         let joinClause = { Kind = LeftJoin; Table = innerTableNameAsAlias; Condition = joinCondition }
@@ -376,8 +377,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
         }
 
         let ir = outerSource |> getQueryOrDefault
-        // Store pending join info associated with this IR object (same reference)
-        PendingJoins.set ir pendingJoin
+        this.PendingJoinInfo <- Some pendingJoin
         QuerySource<'JoinResult, SelectQueryIR>(ir, mergedTables)
 
     /// Introduces a LEFT JOIN table binding (use with on' to complete the join).
@@ -408,8 +408,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
         }
 
         let ir = outerSource |> getQueryOrDefault
-        // Store pending join info associated with this IR object (same reference)
-        PendingJoins.set ir pendingJoin
+        this.PendingJoinInfo <- Some pendingJoin
         QuerySource<'JoinResult, SelectQueryIR>(ir, mergedTables)
 
     /// Completes a pending join with a predicate expression.
@@ -420,8 +419,8 @@ type SelectBuilder<'Selected, 'Mapped> () =
                              [<ProjectionParameter>] joinPredicate: Expression<Func<'T, bool>>) =
         let ir = state.Query
         let pendingJoin =
-            match PendingJoins.tryTake ir with
-            | Some pj -> pj
+            match this.PendingJoinInfo with
+            | Some pj -> this.PendingJoinInfo <- None; pj
             | None -> failwith "on' must be used after join' or leftJoin'"
 
         let tableMappings = state.TableMappings |> Map.values

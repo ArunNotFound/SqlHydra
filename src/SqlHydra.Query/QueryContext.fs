@@ -275,9 +275,22 @@ type QueryContext(conn: DbConnection, emitter: ISqlEmitter) =
 
         match iq.Spec with
         | { IdentityField = Some identityField } ->
-            // Fix mssql guid identity: need OUTPUT clause instead of scope_identity()
-            if provider = SqlServer && typeof<'InsertReturn> = typeof<System.Guid> then
-                cmd.CommandText <- Fixes.MsSql.fixGuidIdentityQuery identityField cmd.CommandText
+            // Add provider-specific identity-returning SQL
+            if provider = SqlServer then
+                if typeof<'InsertReturn> = typeof<System.Guid> then
+                    // GUID needs OUTPUT INSERTED clause instead of scope_identity()
+                    // Insert OUTPUT clause before VALUES
+                    let valuesIdx = cmd.CommandText.IndexOf(" VALUES ", StringComparison.OrdinalIgnoreCase)
+                    if valuesIdx > -1 then
+                        cmd.CommandText <- cmd.CommandText.Insert(valuesIdx, $" OUTPUT INSERTED.{identityField}")
+                else
+                    cmd.CommandText <- cmd.CommandText + ";SELECT scope_identity() as Id"
+            elif provider = Npgsql then
+                cmd.CommandText <- cmd.CommandText + $" RETURNING \"{identityField}\";"
+            elif provider = Oracle then
+                cmd.CommandText <- cmd.CommandText + $" returning \"{identityField}\" into :outputParam"
+            elif provider = Sqlite then
+                cmd.CommandText <- cmd.CommandText + ";select last_insert_rowid() as id"
 
             this.Logger { Sql = cmd.CommandText; Parameters = [] }
 

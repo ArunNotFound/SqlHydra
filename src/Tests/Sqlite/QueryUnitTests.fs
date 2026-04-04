@@ -315,7 +315,7 @@ let ``Update Query with multiple Wheres``() =
         }
         |> toUpdateSql
 
-    sql =! """UPDATE "main"."Customer" SET "FirstName" = @p0, "LastName" = @p1 WHERE ("main"."Customer"."CustomerID" = @p2 AND ("main"."Customer"."FirstName" = @p3))"""
+    sql =! """UPDATE "main"."Customer" SET "FirstName" = @p0, "LastName" = @p1 WHERE (("main"."Customer"."CustomerID" = @p2) AND ("main"."Customer"."FirstName" = @p3))"""
 
 [<Test>]
 let ``Update Query with No Where``() = 

@@ -302,7 +302,7 @@ let ``Update Query with multiple Wheres``() =
         }
         |> toUpdateSql
 
-    sql =! """UPDATE "OT"."CUSTOMERS" SET "NAME" = :p0 WHERE ("OT"."CUSTOMERS"."NAME" = :p1 AND ("OT"."CUSTOMERS"."CUSTOMER_ID" = :p2))"""
+    sql =! """UPDATE "OT"."CUSTOMERS" SET "NAME" = :p0 WHERE (("OT"."CUSTOMERS"."NAME" = :p1) AND ("OT"."CUSTOMERS"."CUSTOMER_ID" = :p2))"""
 
 [<Test>]
 let ``Update Query with No Where``() = 
@@ -441,9 +441,7 @@ let ``Multiple Inserts Fix``() =
             sb.AppendLine("SELECT * FROM DUAL") |> ignore
             sb.ToString()
 
-        let fixedQuery = Fixes.Oracle.fixMultiInsertQuery sql
-
-        Assert.AreEqual(fixedQuery, expected, "SqlKata multiple insert query should be overriden to match.")
+        Assert.AreEqual(sql, expected, "Oracle multiple insert query should use INSERT ALL syntax.")
         
     | None -> 
         ()

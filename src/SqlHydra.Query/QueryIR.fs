@@ -86,6 +86,8 @@ and WhereClause =
     | RawWhere of fragment: string * parameters: obj[]
     /// Boolean column check (e.g., WHERE a.IsActive = true)
     | BoolColumn of column: string * value: bool
+    /// Wraps a clause in parentheses (used by WHERE builder to group conditions)
+    | Grouped of WhereClause
     /// Identity element - no condition
     | Empty
 
@@ -126,17 +128,23 @@ and SelectQueryIR = {
 
 /// Helpers for composing WhereClause values.
 module WhereClause =
-    /// Combines two WHERE clauses with AND, handling Empty as identity.
+    /// Combines two WHERE clauses with AND, wrapping each side in Grouped for proper parenthesization.
     let combineAnd (existing: WhereClause) (newClause: WhereClause) =
         match existing, newClause with
         | Empty, c | c, Empty -> c
-        | l, r -> Combined(l, And, r)
+        | l, r -> Combined(Grouped l, And, Grouped r)
 
-    /// Combines two WHERE clauses with OR, handling Empty as identity.
+    /// Combines two WHERE clauses with OR, wrapping each side in Grouped for proper parenthesization.
     let combineOr (existing: WhereClause) (newClause: WhereClause) =
         match existing, newClause with
         | Empty, c | c, Empty -> c
-        | l, r -> Combined(l, Or, r)
+        | l, r -> Combined(Grouped l, Or, Grouped r)
+
+    /// Combines two clauses with AND without grouping (flat, for JOIN ON conditions).
+    let combineAndFlat (existing: WhereClause) (newClause: WhereClause) =
+        match existing, newClause with
+        | Empty, c | c, Empty -> c
+        | l, r -> Combined(l, And, r)
 
 module SelectQueryIR =
     let empty = {

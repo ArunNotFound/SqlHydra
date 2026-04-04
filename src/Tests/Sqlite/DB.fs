@@ -52,7 +52,11 @@ let toUpdateSql (query: SqlHydra.Query.UpdateQuery<_, _>) =
 
 let toInsertSql (query: SqlHydra.Query.InsertQuery<_, _>) =
     let ir = SqlHydra.Query.KataUtils.fromInsert query.Spec
-    let sql = (emitter.EmitInsert(ir)).Sql
+    let baseSql = (emitter.EmitInsert(ir)).Sql
+    let sql =
+        match query.Spec.IdentityField with
+        | Some _ -> baseSql + ";select last_insert_rowid() as id"
+        | None -> baseSql
     #if DEBUG
     printfn "toSql: %s" sql
     #endif

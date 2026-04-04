@@ -172,7 +172,7 @@ let ``Update Query with multiple Wheres``() =
         }
         |> toUpdateSql
 
-    sql =! "UPDATE [Sales].[Customer] SET [AccountNumber] = @p0 WHERE ([Sales].[Customer].[AccountNumber] = @p1 AND ([Sales].[Customer].[CustomerID] = @p2))"
+    sql =! "UPDATE [Sales].[Customer] SET [AccountNumber] = @p0 WHERE (([Sales].[Customer].[AccountNumber] = @p1) AND ([Sales].[Customer].[CustomerID] = @p2))"
 
 [<Test>]
 let ``Update Query with No Where``() = 

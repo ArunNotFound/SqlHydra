@@ -452,8 +452,8 @@ let ``Inner Join - Multi Column``() =
     sql.Contains("INNER JOIN [Sales].[SalesOrderDetail] AS [d] ON ([o].[SalesOrderID] = [d].[SalesOrderID] AND [o].[ModifiedDate] = [d].[ModifiedDate])") =! true
 
 [<Test>]
-let ``Left Join - Multi Column``() = 
-    let sql = 
+let ``Left Join - Multi Column``() =
+    let sql =
         select {
             for o in Sales.SalesOrderHeader do
             leftJoin d in Sales.SalesOrderDetail on ((o.SalesOrderID, o.ModifiedDate) = (d.Value.SalesOrderID, d.Value.ModifiedDate))
@@ -560,7 +560,7 @@ let ``Update Query with multiple Wheres``() =
         }
         |> toUpdateSql
 
-    sql =! "UPDATE [Sales].[Customer] SET [AccountNumber] = @p0 WHERE ([Sales].[Customer].[AccountNumber] = @p1 AND ([Sales].[Customer].[CustomerID] = @p2))"
+    sql =! "UPDATE [Sales].[Customer] SET [AccountNumber] = @p0 WHERE (([Sales].[Customer].[AccountNumber] = @p1) AND ([Sales].[Customer].[CustomerID] = @p2))"
 
 [<Test>]
 let ``Update Query with No Where``() = 
@@ -781,8 +781,7 @@ let ``Individual column from a leftJoin table should be optional``() =
         }
         
     let sql = query |> toSql
-    sql =! """SELECT [d].[OrderQty] FROM [Sales].[SalesOrderHeader] AS [o] 
-LEFT JOIN [Sales].[SalesOrderDetail] AS [d] ON ([o].[SalesOrderID] = [d].[SalesOrderID])"""
+    sql =! "SELECT [d].[OrderQty] FROM [Sales].[SalesOrderHeader] AS [o] LEFT JOIN [Sales].[SalesOrderDetail] AS [d] ON ([o].[SalesOrderID] = [d].[SalesOrderID])"
 
 [<Test>]
 let ``Individual column from a leftJoin table should be optional if Option map``() =
@@ -794,7 +793,7 @@ let ``Individual column from a leftJoin table should be optional if Option map``
         }
 
     let sql = query |> toSql
-    sql =! "SELECT [d].[OrderQty] FROM [Sales].[SalesOrderHeader] AS [o] \nLEFT JOIN [Sales].[SalesOrderDetail] AS [d] ON ([o].[SalesOrderID] = [d].[SalesOrderID])"
+    sql =! "SELECT [d].[OrderQty] FROM [Sales].[SalesOrderHeader] AS [o] LEFT JOIN [Sales].[SalesOrderDetail] AS [d] ON ([o].[SalesOrderID] = [d].[SalesOrderID])"
 
 [<Test>]
 let ``select option bug fix`` () =

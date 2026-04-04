@@ -1045,7 +1045,7 @@ let visitJoinPredicate<'T> (tables: TableMapping seq) (predicate: Expression<Fun
         | NBinaryAnd(left, right) ->
             let lt = visit left
             let rt = visit right
-            WhereClause.combineAnd lt rt
+            WhereClause.combineAndFlat lt rt
         | NBinaryOr(left, right) ->
             let lt = visit left
             let rt = visit right

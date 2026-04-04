@@ -12,20 +12,43 @@ type SqlServerEmitter() =
     override _.QuoteIdentifier(name) = $"[{name}]"
     override _.ParameterPrefix = "@p"
 
+    /// SQL Server pagination: uses OFFSET/FETCH when ORDER BY is present, TOP when not.
+    /// Note: this is called after ORDER BY is already appended to sb.
     override this.EmitPagination(skip, take, sb, collector) =
+        let hasOrderBy = sb.ToString().Contains("ORDER BY")
         match skip, take with
-        | Some s, Some t ->
+        | Some s, Some t when hasOrderBy ->
             let skipParam = collector.Add(box s)
             let takeParam = collector.Add(box t)
             sb.Append($" OFFSET {skipParam} ROWS FETCH NEXT {takeParam} ROWS ONLY") |> ignore
-        | None, Some t ->
+        | None, Some t when hasOrderBy ->
             let skipParam = collector.Add(box 0)
             let takeParam = collector.Add(box t)
             sb.Append($" OFFSET {skipParam} ROWS FETCH NEXT {takeParam} ROWS ONLY") |> ignore
-        | Some s, None ->
+        | Some s, None when hasOrderBy ->
             let skipParam = collector.Add(box s)
             sb.Append($" OFFSET {skipParam} ROWS") |> ignore
-        | None, None -> ()
+        | None, Some t ->
+            // No ORDER BY: use TOP N (insert after SELECT keyword)
+            let sql = sb.ToString()
+            let selectIdx = sql.IndexOf("SELECT ", StringComparison.OrdinalIgnoreCase)
+            if selectIdx >= 0 then
+                let insertAt = selectIdx + "SELECT ".Length
+                // Check for DISTINCT
+                let afterSelect = sql.Substring(insertAt)
+                let actualInsert =
+                    if afterSelect.StartsWith("DISTINCT ", StringComparison.OrdinalIgnoreCase)
+                    then insertAt + "DISTINCT ".Length
+                    else insertAt
+                let topClause = $"TOP ({t}) "
+                sb.Clear() |> ignore
+                sb.Append(sql.Insert(actualInsert, topClause)) |> ignore
+        | _ -> ()
+
+    // SQL Server emits boolean values as cast(x as bit) inline
+    override _.EmitBoolColumn(quotedCol, value, _collector) =
+        let bitVal = if value then "1" else "0"
+        $"{quotedCol} = cast({bitVal} as bit)"
 
     override _.EmitInsertIdentity(_field) =
         ";SELECT scope_identity() as Id"
@@ -54,16 +77,6 @@ type SqlServerEmitter() =
         else
             updateSql + outputClause
 
-    override this.EmitInsertConflict(insertType, insertSql, _columns, _rows, collector) =
-        match insertType with
-        | InsertOrUpdateOnUnique (keyFields, updateFields) ->
-            // SQL Server TRY/CATCH upsert pattern
-            // NOTE: The actual parameter creation for update/key values happens in QueryContext
-            // since we need access to the entity values. This just returns the base INSERT.
-            // The TRY/CATCH wrapping is handled in QueryContext.PrepareInsertCommand.
-            insertSql
-        | _ -> insertSql
-
     interface ISqlEmitter with
         member _.Provider = SqlServer
         member this.EmitSelect(ir) = this.EmitSelectCore(ir)
@@ -82,10 +95,13 @@ type PostgresEmitter() =
     override _.EmitInsertIdentity(field) =
         $" RETURNING \"{field}\";"
 
+    // Postgres uses case-insensitive ilike
+    override _.EmitLike(quotedCol, paramName) = $"{quotedCol} ilike {paramName}"
+    override _.EmitNotLike(quotedCol, paramName) = $"NOT ({quotedCol} ilike {paramName})"
+
     override this.EmitInsertConflict(insertType, insertSql, columns, _rows, _collector) =
         match insertType with
         | OnConflictDoUpdate (conflictFields, updateFields) ->
-            // Separate insert from identity query
             let insertQuery, identityQuery =
                 match insertSql.Split([| ";" |], StringSplitOptions.RemoveEmptyEntries) with
                 | [| iq; idq |] -> iq, idq
@@ -135,6 +151,9 @@ type SqliteEmitter() =
 
     override _.QuoteIdentifier(name) = $"\"{name}\""
     override _.ParameterPrefix = "@p"
+
+    override _.EmitInsertIdentity(_field) =
+        ";select last_insert_rowid() as id"
 
     override this.EmitInsertConflict(insertType, insertSql, _columns, _rows, _collector) =
         match insertType with
@@ -191,6 +210,16 @@ type OracleEmitter() =
 
     override _.QuoteIdentifier(name) = $"\"{name}\""
     override _.ParameterPrefix = ":p"
+
+    // Oracle doesn't use AS for table aliases
+    override this.QuoteTableSpec(spec: string) =
+        let parts = spec.Split([| " as "; " AS "; " As " |], StringSplitOptions.RemoveEmptyEntries)
+        match parts with
+        | [| table; alias |] ->
+            $"{this.QuoteDotted(table.Trim())} {this.QuoteIdentifier(alias.Trim())}"
+        | [| table |] ->
+            this.QuoteDotted(table.Trim())
+        | _ -> spec
 
     override this.EmitPagination(skip, take, sb, collector) =
         match skip with

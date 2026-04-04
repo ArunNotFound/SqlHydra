@@ -2,6 +2,7 @@ namespace SqlHydra.Query
 
 open System
 open System.Text
+open System.Text.RegularExpressions
 
 /// Collects parameters during SQL emission.
 type ParameterCollector(prefix: string) =
@@ -46,6 +47,11 @@ type SqlEmitterBase() =
     /// Emit OUTPUT clause for UPDATE (SQL Server). Default: no-op.
     abstract EmitUpdateOutput: outputFields: OutputField list * updateSql: string -> string
 
+    /// Emit LIKE clause. Override for provider-specific behavior (e.g., Postgres ilike).
+    abstract EmitLike: quotedCol: string * paramName: string -> string
+    /// Emit NOT LIKE clause. Override for provider-specific behavior.
+    abstract EmitNotLike: quotedCol: string * paramName: string -> string
+
     /// Creates a new ParameterCollector with this emitter's prefix.
     member this.CreateCollector() = ParameterCollector(this.ParameterPrefix)
 
@@ -56,8 +62,8 @@ type SqlEmitterBase() =
         |> String.concat "."
 
     /// Parses and quotes a FROM/JOIN table spec like "Schema.Table as alias" or "Schema.Table".
-    member this.QuoteTableSpec(spec: string) =
-        // Handle "Schema.Table as alias" or "Schema.Table AS alias"
+    abstract QuoteTableSpec: string -> string
+    default this.QuoteTableSpec(spec: string) =
         let parts = spec.Split([| " as "; " AS "; " As " |], StringSplitOptions.RemoveEmptyEntries)
         match parts with
         | [| table; alias |] ->
@@ -70,6 +76,14 @@ type SqlEmitterBase() =
     member this.QuoteColumn(col: string) =
         this.QuoteDotted(col)
 
+    /// Processes a raw SQL fragment, replacing {alias}.{column} templates with quoted identifiers.
+    member this.QuoteRawFragment(fragment: string) =
+        Regex.Replace(fragment, @"\{(\w+)\}\.\{(\w+)\}", fun m ->
+            let alias = m.Groups.[1].Value
+            let col = m.Groups.[2].Value
+            $"{this.QuoteIdentifier(alias)}.{this.QuoteIdentifier(col)}"
+        )
+
     /// Emits a SqlValue, returning the SQL fragment.
     member this.EmitValue(value: SqlValue, collector: ParameterCollector) =
         match value with
@@ -80,7 +94,7 @@ type SqlEmitterBase() =
         | ColumnRef col -> this.QuoteColumn(col)
         | SubQuery ir ->
             let compiled = this.EmitSelectCore(ir)
-            // Merge sub-query parameters
+            // Merge sub-query parameters into outer collector
             for (_, v) in compiled.Parameters do
                 collector.Add(v) |> ignore
             $"({compiled.Sql})"
@@ -103,54 +117,56 @@ type SqlEmitterBase() =
         | Lt -> "<"
         | LtEq -> "<="
 
-    /// Emits a WHERE/HAVING clause to a string.
-    member this.EmitWhere(clause: WhereClause, collector: ParameterCollector) : string =
+    /// Emits a WHERE/HAVING/ON clause to a string (without outer wrapping parens).
+    member this.EmitWhereInner(clause: WhereClause, collector: ParameterCollector) : string =
         match clause with
         | Empty -> ""
         | Compare (col, op, value) ->
             let quotedCol = this.QuoteColumn(col)
             let valueSql = this.EmitValue(value, collector)
-            $"({quotedCol} {this.EmitOp(op)} {valueSql})"
+            $"{quotedCol} {this.EmitOp(op)} {valueSql}"
         | CompareColumns (left, op, right) ->
-            $"({this.QuoteColumn(left)} {this.EmitOp(op)} {this.QuoteColumn(right)})"
+            $"{this.QuoteColumn(left)} {this.EmitOp(op)} {this.QuoteColumn(right)}"
         | IsNull col ->
-            $"({this.QuoteColumn(col)} IS NULL)"
+            $"{this.QuoteColumn(col)} IS NULL"
         | IsNotNull col ->
-            $"({this.QuoteColumn(col)} IS NOT NULL)"
+            $"{this.QuoteColumn(col)} IS NOT NULL"
         | InValues (col, values) ->
             let quotedCol = this.QuoteColumn(col)
             let paramNames = values |> Array.map (fun v -> collector.Add(v)) |> String.concat ", "
-            $"({quotedCol} IN ({paramNames}))"
+            $"{quotedCol} IN ({paramNames})"
         | InSubQuery (col, subquery) ->
             let compiled = this.EmitSelectCore(subquery)
             for (_, v) in compiled.Parameters do
                 collector.Add(v) |> ignore
-            $"({this.QuoteColumn(col)} IN ({compiled.Sql}))"
+            $"{this.QuoteColumn(col)} IN ({compiled.Sql})"
         | NotInValues (col, values) ->
             let quotedCol = this.QuoteColumn(col)
             let paramNames = values |> Array.map (fun v -> collector.Add(v)) |> String.concat ", "
-            $"({quotedCol} NOT IN ({paramNames}))"
+            $"{quotedCol} NOT IN ({paramNames})"
         | NotInSubQuery (col, subquery) ->
             let compiled = this.EmitSelectCore(subquery)
             for (_, v) in compiled.Parameters do
                 collector.Add(v) |> ignore
-            $"({this.QuoteColumn(col)} NOT IN ({compiled.Sql}))"
+            $"{this.QuoteColumn(col)} NOT IN ({compiled.Sql})"
         | Like (col, pattern) ->
             let quotedCol = this.QuoteColumn(col)
             let paramName = collector.Add(pattern)
-            $"(LOWER({quotedCol}) LIKE {paramName})"
+            this.EmitLike(quotedCol, paramName)
         | NotLike (col, pattern) ->
             let quotedCol = this.QuoteColumn(col)
             let paramName = collector.Add(pattern)
-            $"(LOWER({quotedCol}) NOT LIKE {paramName})"
+            this.EmitNotLike(quotedCol, paramName)
         | Not inner ->
             let innerSql = this.EmitWhere(inner, collector)
-            $"(NOT {innerSql})"
+            $"NOT {innerSql}"
         | Combined (left, logOp, right) ->
-            let leftSql = this.EmitWhere(left, collector)
-            let rightSql = this.EmitWhere(right, collector)
+            let leftSql = this.EmitWhereInner(left, collector)
+            let rightSql = this.EmitWhereInner(right, collector)
             let opStr = match logOp with And -> "AND" | Or -> "OR"
-            $"({leftSql} {opStr} {rightSql})"
+            $"{leftSql} {opStr} {rightSql}"
+        | Grouped inner ->
+            this.EmitWhere(inner, collector) // wrap in parens
         | RawWhere (fragment, parms) ->
             let mutable result = fragment
             for p in parms do
@@ -158,11 +174,15 @@ type SqlEmitterBase() =
                 let idx = result.IndexOf("?")
                 if idx >= 0 then
                     result <- result.Substring(0, idx) + name + result.Substring(idx + 1)
-            $"({result})"
+            result
         | BoolColumn (col, value) ->
             let quotedCol = this.QuoteColumn(col)
-            let paramName = collector.Add(box value)
-            $"({quotedCol} = {paramName})"
+            this.EmitBoolColumn(quotedCol, value, collector)
+
+    /// Emits a WHERE/HAVING clause wrapped in parentheses (for top-level usage).
+    member this.EmitWhere(clause: WhereClause, collector: ParameterCollector) : string =
+        let inner = this.EmitWhereInner(clause, collector)
+        if inner = "" then "" else $"({inner})"
 
     /// Emits a SELECT query to SQL.
     member this.EmitSelectCore(ir: SelectQueryIR) : CompiledQuery =
@@ -186,7 +206,7 @@ type SqlEmitterBase() =
                     match col with
                     | AllColumns alias -> $"{this.QuoteIdentifier(alias)}.*"
                     | SpecificColumn name -> this.QuoteColumn(name)
-                    | RawColumn fragment -> fragment
+                    | RawColumn fragment -> this.QuoteRawFragment(fragment)
                 )
                 |> String.concat ", "
                 |> sb.Append |> ignore
@@ -231,7 +251,7 @@ type SqlEmitterBase() =
                     match ob with
                     | OrderByColumn (col, Asc) -> this.QuoteColumn(col)
                     | OrderByColumn (col, Desc) -> $"{this.QuoteColumn(col)} DESC"
-                    | OrderByRaw fragment -> fragment
+                    | OrderByRaw fragment -> this.QuoteRawFragment(fragment)
                 )
                 |> String.concat ", "
             sb.Append($" ORDER BY {orderCols}") |> ignore
@@ -258,14 +278,8 @@ type SqlEmitterBase() =
             | [ row ] -> this.EmitSingleInsert(ir.Table, ir.Columns, row, collector)
             | rows -> this.EmitMultiRowInsert(ir.Table, ir.Columns, rows, collector)
 
-        // Apply identity returning
-        let withIdentity =
-            match ir.IdentityField with
-            | Some field -> baseSql + this.EmitInsertIdentity(field)
-            | None -> baseSql
-
         // Apply conflict handling
-        let withConflict = this.EmitInsertConflict(ir.InsertType, withIdentity, ir.Columns, ir.Rows, collector)
+        let withConflict = this.EmitInsertConflict(ir.InsertType, baseSql, ir.Columns, ir.Rows, collector)
 
         // Apply output clause
         let withOutput =
@@ -362,3 +376,14 @@ type SqlEmitterBase() =
             let paramName = collector.Add(box s)
             sb.Append($" OFFSET {paramName}") |> ignore
         | None -> ()
+
+    /// Default LIKE: case-insensitive via LOWER()
+    default _.EmitLike(quotedCol, paramName) = $"LOWER({quotedCol}) like {paramName}"
+    /// Default NOT LIKE: NOT (col like @p)
+    default _.EmitNotLike(quotedCol, paramName) = $"NOT (LOWER({quotedCol}) like {paramName})"
+
+    /// Emit a boolean column comparison. Override for provider-specific behavior (e.g., SQL Server cast(x as bit)).
+    abstract EmitBoolColumn: quotedCol: string * value: bool * collector: ParameterCollector -> string
+    default this.EmitBoolColumn(quotedCol, value, collector) =
+        let paramName = collector.Add(box value)
+        $"{quotedCol} = {paramName}"
