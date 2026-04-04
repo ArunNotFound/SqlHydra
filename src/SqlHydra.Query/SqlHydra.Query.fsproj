@@ -34,7 +34,7 @@
 		<Compile Include="SqlEmitter.fs" />
 		<Compile Include="SqlEmitterBase.fs" />
 		<Compile Include="SqlEmitters.fs" />
-		<Compile Include="Kata.fs" />
+		<Compile Include="Core.fs" />
 		<Compile Include="QueryFunctions.fs" />
 		<Compile Include="QuotationVisitor.fs" />
 		<Compile Include="ExpressionNormalizer.fs" />

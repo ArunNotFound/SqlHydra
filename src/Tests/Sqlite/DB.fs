@@ -43,7 +43,7 @@ let toSql (query: SqlHydra.Query.SelectQuery) =
     sql
 
 let toUpdateSql (query: SqlHydra.Query.UpdateQuery<_, _>) =
-    let ir = SqlHydra.Query.KataUtils.fromUpdate query.Spec
+    let ir = SqlHydra.Query.QueryUtils.fromUpdate query.Spec
     let sql = (emitter.EmitUpdate(ir)).Sql
     #if DEBUG
     printfn "toSql: %s" sql
@@ -51,7 +51,7 @@ let toUpdateSql (query: SqlHydra.Query.UpdateQuery<_, _>) =
     sql
 
 let toInsertSql (query: SqlHydra.Query.InsertQuery<_, _>) =
-    let ir = SqlHydra.Query.KataUtils.fromInsert query.Spec
+    let ir = SqlHydra.Query.QueryUtils.fromInsert query.Spec
     let baseSql = (emitter.EmitInsert(ir)).Sql
     let sql =
         match query.Spec.IdentityField with

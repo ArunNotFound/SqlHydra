@@ -43,7 +43,7 @@ type QueryContext(conn: DbConnection, emitter: ISqlEmitter) =
                 do setParameterDbType p qp
                 qp.Value
             | _ -> value
-            |> KataUtils.convertIfDateOnlyTimeOnly
+            |> QueryUtils.convertIfDateOnlyTimeOnly
         p :> Data.IDbDataParameter
 
 
@@ -252,8 +252,8 @@ type QueryContext(conn: DbConnection, emitter: ISqlEmitter) =
     /// Prepares a DbCommand for an insert query, applying all SQL modifications.
     /// Returns the prepared command and an InsertExecMode indicating how to execute it.
     member private this.PrepareInsertCommand<'T, 'InsertReturn> (iq: InsertQuery<'T, 'InsertReturn>) =
-        KataUtils.failIfIdentityOnConflict iq.Spec
-        let insertIR = KataUtils.fromInsert iq.Spec
+        QueryUtils.failIfIdentityOnConflict iq.Spec
+        let insertIR = QueryUtils.fromInsert iq.Spec
         let compiled = emitter.EmitInsert(insertIR)
         let cmd = this.BuildCommandFromCompiled(compiled, log = false)
 
@@ -262,7 +262,7 @@ type QueryContext(conn: DbConnection, emitter: ISqlEmitter) =
         | InsertOrUpdateOnUnique (keyFields, updateFields) ->
             let entity = iq.Spec.Entities |> List.head
             let propMap = FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>) |> Array.map (fun p -> p.Name, p) |> Map.ofArray
-            let getColumnValue col = KataUtils.getQueryParameterForEntity entity propMap[col]
+            let getColumnValue col = QueryUtils.getQueryParameterForEntity entity propMap[col]
             let existingParams = [ for i in 0 .. cmd.Parameters.Count - 1 -> cmd.Parameters[i] :> Data.IDbDataParameter ]
             let newSql, allParams =
                 InsertOrUpdateOnUnique.apply iq.Spec.Table keyFields updateFields cmd.CommandText existingParams (createParam cmd) getColumnValue
@@ -354,7 +354,7 @@ type QueryContext(conn: DbConnection, emitter: ISqlEmitter) =
         }
 
     member this.Update (query: UpdateQuery<'T, 'UpdateReturn>) =
-        let updateIR = KataUtils.fromUpdate query.Spec
+        let updateIR = QueryUtils.fromUpdate query.Spec
         let compiled = emitter.EmitUpdate(updateIR)
         use cmd = this.BuildCommandFromCompiled(compiled)
         cmd.ExecuteNonQuery()
@@ -365,7 +365,7 @@ type QueryContext(conn: DbConnection, emitter: ISqlEmitter) =
     member this.UpdateAsyncWithOptions (query: UpdateQuery<'T, 'UpdateReturn>, ?cancel: CancellationToken) =
         task { // Must wrap in task to prevent `EndExecuteNonQuery` ex in NET6_0_OR_GREATER
             let cancel = defaultArg cancel CancellationToken.None
-            let updateIR = KataUtils.fromUpdate query.Spec
+            let updateIR = QueryUtils.fromUpdate query.Spec
 
             if query.Spec.OutputFields.Length > 0 then
                 // Emit update with output clause

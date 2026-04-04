@@ -136,7 +136,7 @@ module PendingJoins =
             Some pj
         | false, _ -> None
 
-module internal KataUtils =
+module internal QueryUtils =
 
     // Manually convert DateOnly to DateTime and TimeOnly to TimeSpan (until Microsoft.Data.SqlClient handles)
     let convertIfDateOnlyTimeOnly (value: obj) =
