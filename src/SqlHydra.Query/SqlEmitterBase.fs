@@ -377,10 +377,10 @@ type SqlEmitterBase() =
             sb.Append($" OFFSET {paramName}") |> ignore
         | None -> ()
 
-    /// Default LIKE: case-insensitive via LOWER()
-    default _.EmitLike(quotedCol, paramName) = $"LOWER({quotedCol}) like {paramName}"
+    /// Default LIKE: case-insensitive via LOWER() on both sides
+    default _.EmitLike(quotedCol, paramName) = $"LOWER({quotedCol}) like LOWER({paramName})"
     /// Default NOT LIKE: NOT (col like @p)
-    default _.EmitNotLike(quotedCol, paramName) = $"NOT (LOWER({quotedCol}) like {paramName})"
+    default _.EmitNotLike(quotedCol, paramName) = $"NOT (LOWER({quotedCol}) like LOWER({paramName}))"
 
     /// Emit a boolean column comparison. Override for provider-specific behavior (e.g., SQL Server cast(x as bit)).
     abstract EmitBoolColumn: quotedCol: string * value: bool * collector: ParameterCollector -> string

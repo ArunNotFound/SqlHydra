@@ -83,7 +83,7 @@ let ``Where Not Like``() =
         }
         |> toSql
 
-    sql =! """SELECT * FROM "OT"."CUSTOMERS" "c" WHERE (NOT (LOWER("c"."ADDRESS") like :p0))"""
+    sql =! """SELECT * FROM "OT"."CUSTOMERS" "c" WHERE (NOT (LOWER("c"."ADDRESS") like LOWER(:p0)))"""
 
 
 [<Test>]
