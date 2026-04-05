@@ -292,9 +292,9 @@ let visitSelectExpr<'T, 'Selected> (selectExpression: Expression<Func<'T, 'Selec
         match exp with
         | AggregateColumn (aggType, (p, _)) ->
             let alias = visitAlias p.Expression
-            let fqCol = $"[{alias}].[{p.Member.Name}]"
+            let fqCol = $"{{%s{alias}}}.{{%s{p.Member.Name}}}"
             let sqlFragment = $"{aggType}({fqCol})"
-            let exprAlias = $"__hydra_expr_{!sqlExprCounter}"
+            let exprAlias = $"hydra_expr_{!sqlExprCounter}"
             sqlExprCounter := !sqlExprCounter + 1
             let key = $"__sqlfn:{sqlFragment}"
             getOrAddLeaf key
@@ -505,9 +505,24 @@ let visitSelectExpr<'T, 'Selected> (selectExpression: Expression<Func<'T, 'Selec
         | Parameter _ -> exp
 
         | Member m when m.Member.DeclaringType <> null && m.Member.DeclaringType |> isOptionOrNullableType ->
-            let newExpr = rewrite m.Expression
-            if obj.ReferenceEquals(newExpr, m.Expression) then exp
-            else Expression.MakeMemberAccess(newExpr, m.Member) :> Expression
+            // If this is .Value on a column (e.g., p.NullablePrice.Value), create a ColumnLeaf
+            // with the unwrapped type directly, avoiding a runtime .Value call that would throw on NULL.
+            if m.Member.Name = "Value" && m.Expression <> null && isTableExpr m.Expression then
+                let alias = resolveAliasFromExpr m.Expression
+                match m.Expression with
+                | Member innerMem ->
+                    let key = $"{alias}.{innerMem.Member.Name}"
+                    getOrAddLeaf key
+                        (fun idx -> ColumnLeaf (alias, innerMem.Member.Name, m.Type, false, false, idx))
+                        m.Type
+                | _ ->
+                    let newExpr = rewrite m.Expression
+                    if obj.ReferenceEquals(newExpr, m.Expression) then exp
+                    else Expression.MakeMemberAccess(newExpr, m.Member) :> Expression
+            else
+                let newExpr = rewrite m.Expression
+                if obj.ReferenceEquals(newExpr, m.Expression) then exp
+                else Expression.MakeMemberAccess(newExpr, m.Member) :> Expression
 
         | Member m when m.Expression <> null && isTableExpr m.Expression ->
             let alias = resolveAliasFromExpr m.Expression
@@ -558,7 +573,7 @@ let visitSelectExpr<'T, 'Selected> (selectExpression: Expression<Func<'T, 'Selec
         | _ -> exp
 
     and rewriteSqlFunction (m: MethodCallExpression) (originalExp: Expression) =
-        let qualifyCol alias (mem: MemberInfo) = $"[{alias}].[{mem.Name}]"
+        let qualifyCol alias (mem: MemberInfo) = $"{{%s{alias}}}.{{%s{mem.Name}}}"
         let rec visitSqlFnWithProvenance (exp: Expression) : string =
             match exp with
             | MethodCall m ->
@@ -587,7 +602,7 @@ let visitSelectExpr<'T, 'Selected> (selectExpression: Expression<Func<'T, 'Selec
                 notImplMsg $"Expected a method call expression but got: {exp.NodeType}"
 
         let sqlFragment = visitSqlFnWithProvenance (m :> Expression)
-        let exprAlias = $"__hydra_expr_{!sqlExprCounter}"
+        let exprAlias = $"hydra_expr_{!sqlExprCounter}"
         sqlExprCounter := !sqlExprCounter + 1
         let key = $"__sqlfn:{sqlFragment}"
         getOrAddLeaf key
