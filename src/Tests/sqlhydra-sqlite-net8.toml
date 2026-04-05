@@ -11,3 +11,5 @@ reader_type = "System.Data.Common.DbDataReader"
 [filters]
 include = [ "*" ]
 exclude = [ "hr/*" ]
+[extensions]
+type_mappings = ["Tests"]

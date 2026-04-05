@@ -137,11 +137,8 @@ let run (args: Args) =
     // Ensure the output directory exists (`cfg.OutputFile` may contain subdirectories).
     outputFile.Directory.Create()
 
-    // Load extensions: auto-scan the target project + any TOML-configured external extensions
-    let extensions =
-        let projectExts = Extensions.scanProject args.Project
-        let namedExts = Extensions.loadNamed args.Project cfg.TypeMappingExtensions
-        projectExts @ namedExts
+    // Load extensions from TOML-configured assemblies (explicit opt-in only)
+    let extensions = Extensions.loadNamed args.Project cfg.TypeMappingExtensions
 
     let generatedCode =
         let isLegacy = Fsproj.targetsLegacyFramework args.Project

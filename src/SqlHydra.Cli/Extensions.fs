@@ -102,22 +102,28 @@ let loadProvider (project: FileInfo) (assemblyName: string) : ISqlHydraDbProvide
     | _ -> failwith $"Multiple ISqlHydraDbProvider implementations found in '{dllName}'. Expected exactly one."
 
 /// Loads named extension assemblies (from TOML [extensions] config).
-/// Each name must be a PackageReference or ProjectReference in the target project.
+/// Each name must be a PackageReference, ProjectReference, or the target project itself.
 let loadNamed (project: FileInfo) (extensionNames: string list) : ISqlHydraExtension list =
     extensionNames
     |> List.collect (fun extName ->
-        let root = ProjectRootElement.Open(project.FullName)
-        let hasRef =
-            root.ItemGroups
-            |> Seq.collect _.Items
-            |> Seq.exists (fun item ->
-                match item.ItemType with
-                | "PackageReference" -> item.Include = extName
-                | "ProjectReference" -> Path.GetFileNameWithoutExtension(item.Include) = extName
-                | _ -> false
-            )
-        if not hasRef then
-            failwith $"Extension '{extName}' was not found as a PackageReference or ProjectReference in '{project.Name}'."
+        let projectName = Path.GetFileNameWithoutExtension(project.Name)
+
+        // Allow the target project itself as an extension source
+        let isTargetProject = extName = projectName
+
+        if not isTargetProject then
+            let root = ProjectRootElement.Open(project.FullName)
+            let hasRef =
+                root.ItemGroups
+                |> Seq.collect _.Items
+                |> Seq.exists (fun item ->
+                    match item.ItemType with
+                    | "PackageReference" -> item.Include = extName
+                    | "ProjectReference" -> Path.GetFileNameWithoutExtension(item.Include) = extName
+                    | _ -> false
+                )
+            if not hasRef then
+                failwith $"Extension '{extName}' was not found as a PackageReference or ProjectReference in '{project.Name}'."
 
         let dllName = $"{extName}.dll"
         match findDll project dllName with

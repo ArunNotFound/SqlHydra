@@ -10,11 +10,33 @@ let private valueTypes =
 let isValueType (typeName: string) = 
     valueTypes.Contains typeName
 
+/// Represents the mapping between a database column type and the generated F# type.
 type TypeMapping =
     {
+        /// The fully-qualified CLR type name to use in generated code.
+        /// Example: "string", "System.DateTimeOffset", "MyApp.Types.EmailAddress".
         ClrType: string
+
+        /// The ADO.NET DbType used when binding parameters for this column.
+        /// This is provider-agnostic and applies to all database providers.
         DbType: DbType
+
+        /// The provider-specific database type used for parameter binding.
+        ///
+        /// When set, SqlHydra.Query will assign this value to the provider's
+        /// parameter type enum (e.g., SqlDbType, NpgsqlDbType, OracleDbType).
+        ///
+        /// Use this when the provider requires a specific enum value for correct
+        /// parameter binding (e.g., "Jsonb", "Vector", "UniqueIdentifier").
+        ///
+        /// Leave as None for providers that do not have provider-specific
+        /// parameter types (e.g., SQLite), or when the default provider mapping
+        /// is sufficient.
         ProviderDbType: string option
+
+        /// The original database column type name (e.g., "varchar", "jsonb").
+        /// This is used for code generation and for extension authors to
+        /// preserve or override the provider's type alias.
         ColumnTypeAlias: string
     }
     member this.IsValueType() = 
