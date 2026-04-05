@@ -14,13 +14,13 @@ module main =
     [<CLIMutable>]
     type Address =
         { AddressID: int64
-          AddressLine1: Sqlite.CustomTypes.Text
-          AddressLine2: Option<Sqlite.CustomTypes.Text>
-          City: Sqlite.CustomTypes.Text
-          StateProvince: Sqlite.CustomTypes.Text
-          CountryRegion: Sqlite.CustomTypes.Text
-          PostalCode: Sqlite.CustomTypes.Text
-          rowguid: Sqlite.CustomTypes.Text
+          AddressLine1: string
+          AddressLine2: Option<string>
+          City: string
+          StateProvince: string
+          CountryRegion: string
+          PostalCode: string
+          rowguid: string
           ModifiedDate: System.DateTime }
 
     let Address = table<Address>
@@ -28,7 +28,7 @@ module main =
     [<CLIMutable>]
     type BuildVersion =
         { SystemInformationID: int64
-          ``Database Version``: Sqlite.CustomTypes.Text
+          ``Database Version``: string
           VersionDate: System.DateTime
           ModifiedDate: System.DateTime }
 
@@ -38,18 +38,18 @@ module main =
     type Customer =
         { CustomerID: int64
           NameStyle: int64
-          Title: Option<Sqlite.CustomTypes.Text>
-          FirstName: Sqlite.CustomTypes.Text
-          MiddleName: Option<Sqlite.CustomTypes.Text>
-          LastName: Sqlite.CustomTypes.Text
-          Suffix: Option<Sqlite.CustomTypes.Text>
-          CompanyName: Option<Sqlite.CustomTypes.Text>
-          SalesPerson: Option<Sqlite.CustomTypes.Text>
-          EmailAddress: Option<Sqlite.CustomTypes.Text>
-          Phone: Option<Sqlite.CustomTypes.Text>
-          PasswordHash: Sqlite.CustomTypes.Text
-          PasswordSalt: Sqlite.CustomTypes.Text
-          rowguid: Sqlite.CustomTypes.Text
+          Title: Option<string>
+          FirstName: string
+          MiddleName: Option<string>
+          LastName: string
+          Suffix: Option<string>
+          CompanyName: Option<string>
+          SalesPerson: Option<string>
+          EmailAddress: Option<string>
+          Phone: Option<string>
+          PasswordHash: string
+          PasswordSalt: string
+          rowguid: string
           ModifiedDate: System.DateTime }
 
     let Customer = table<Customer>
@@ -58,8 +58,8 @@ module main =
     type CustomerAddress =
         { CustomerID: int64
           AddressID: int64
-          AddressType: Sqlite.CustomTypes.Text
-          rowguid: Sqlite.CustomTypes.Text
+          AddressType: string
+          rowguid: string
           ModifiedDate: System.DateTime }
 
     let CustomerAddress = table<CustomerAddress>
@@ -68,25 +68,25 @@ module main =
     type ErrorLog =
         { ErrorLogID: int64
           ErrorTime: System.DateTime
-          UserName: Sqlite.CustomTypes.Text
+          UserName: string
           ErrorNumber: int64
           ErrorSeverity: Option<int64>
           ErrorState: Option<int64>
-          ErrorProcedure: Option<Sqlite.CustomTypes.Text>
+          ErrorProcedure: Option<string>
           ErrorLine: Option<int64>
-          ErrorMessage: Sqlite.CustomTypes.Text }
+          ErrorMessage: string }
 
     let ErrorLog = table<ErrorLog>
 
     [<CLIMutable>]
     type Product =
         { ProductID: int64
-          Name: Sqlite.CustomTypes.Text
-          ProductNumber: Sqlite.CustomTypes.Text
-          Color: Option<Sqlite.CustomTypes.Text>
+          Name: string
+          ProductNumber: string
+          Color: Option<string>
           StandardCost: int64
           ListPrice: int64
-          Size: Option<Sqlite.CustomTypes.Text>
+          Size: Option<string>
           Weight: Option<int64>
           ProductCategoryID: Option<int64>
           ProductModelID: Option<int64>
@@ -94,8 +94,8 @@ module main =
           SellEndDate: Option<System.DateTime>
           DiscontinuedDate: Option<System.DateTime>
           ThumbNailPhoto: Option<byte[]>
-          ThumbnailPhotoFileName: Option<Sqlite.CustomTypes.Text>
-          rowguid: Sqlite.CustomTypes.Text
+          ThumbnailPhotoFileName: Option<string>
+          rowguid: string
           ModifiedDate: System.DateTime }
 
     let Product = table<Product>
@@ -104,8 +104,8 @@ module main =
     type ProductCategory =
         { ProductCategoryID: int64
           ParentProductCategoryID: Option<int64>
-          Name: Sqlite.CustomTypes.Text
-          rowguid: Sqlite.CustomTypes.Text
+          Name: string
+          rowguid: string
           ModifiedDate: System.DateTime }
 
     let ProductCategory = table<ProductCategory>
@@ -113,8 +113,8 @@ module main =
     [<CLIMutable>]
     type ProductDescription =
         { ProductDescriptionID: int64
-          Description: Sqlite.CustomTypes.Text
-          rowguid: Sqlite.CustomTypes.Text
+          Description: string
+          rowguid: string
           ModifiedDate: System.DateTime }
 
     let ProductDescription = table<ProductDescription>
@@ -122,9 +122,9 @@ module main =
     [<CLIMutable>]
     type ProductModel =
         { ProductModelID: int64
-          Name: Sqlite.CustomTypes.Text
-          CatalogDescription: Option<Sqlite.CustomTypes.Text>
-          rowguid: Sqlite.CustomTypes.Text
+          Name: string
+          CatalogDescription: Option<string>
+          rowguid: string
           ModifiedDate: System.DateTime }
 
     let ProductModel = table<ProductModel>
@@ -133,8 +133,8 @@ module main =
     type ProductModelProductDescription =
         { ProductModelID: int64
           ProductDescriptionID: int64
-          Culture: Sqlite.CustomTypes.Text
-          rowguid: Sqlite.CustomTypes.Text
+          Culture: string
+          rowguid: string
           ModifiedDate: System.DateTime }
 
     let ProductModelProductDescription = table<ProductModelProductDescription>
@@ -148,7 +148,7 @@ module main =
           UnitPrice: int64
           UnitPriceDiscount: int64
           LineTotal: int64
-          rowguid: Sqlite.CustomTypes.Text
+          rowguid: string
           ModifiedDate: System.DateTime }
 
     let SalesOrderDetail = table<SalesOrderDetail>
@@ -164,18 +164,18 @@ module main =
           OnlineOrderFlag: int64
           SalesOrderNumber: string
           PurchaseOrderNumber: Option<int64>
-          AccountNumber: Option<Sqlite.CustomTypes.Text>
+          AccountNumber: Option<string>
           CustomerID: int64
           ShipToAddressID: Option<int>
           BillToAddressID: Option<int>
-          ShipMethod: Sqlite.CustomTypes.Text
-          CreditCardApprovalCode: Option<Sqlite.CustomTypes.Text>
+          ShipMethod: string
+          CreditCardApprovalCode: Option<string>
           SubTotal: int64
           TaxAmt: int64
           Freight: int64
           TotalDue: int64
-          Comment: Option<Sqlite.CustomTypes.Text>
-          rowguid: Sqlite.CustomTypes.Text
+          Comment: Option<string>
+          rowguid: string
           ModifiedDate: System.DateTime }
 
     let SalesOrderHeader = table<SalesOrderHeader>
