@@ -703,13 +703,55 @@ If you get SSL certificate errors, append `;TrustServerCertificate=True` to your
 <details>
 <summary><h2>Extensibility</h2></summary>
 
+### Creating a Custom Database Provider
+
+SqlHydra supports 5 built-in database providers (SQL Server, PostgreSQL, SQLite, MySQL, Oracle), but you can add support for any database by implementing the `ISqlHydraDbProvider` interface from `SqlHydra.Domain`.
+
+#### Implementing the Provider
+
+Create a library project that references `SqlHydra.Domain` and implements `ISqlHydraDbProvider`:
+
+```fsharp
+open SqlHydra.Domain
+
+type DuckDbProvider() =
+    interface ISqlHydraDbProvider with
+        member _.Id = "duckdb"
+        member _.Name = "SqlHydra.DuckDb"
+        member _.Type = Custom "DuckDb"
+        member _.DefaultReaderType = "System.Data.Common.DbDataReader"
+        member _.DefaultProvider = "DuckDB.NET.Data"
+        member _.SqlEmitter = "MyApp.DuckDbEmitter()"
+        member _.ProviderConnectionType = "DuckDB.NET.Data.DuckDBConnection"
+        member _.GetSchema(cfg, isLegacy, extensions) =
+            // Query database metadata and return a Schema
+            // with Tables, Columns, and type mappings
+            ...
+```
+
+The `GetSchema` method is the core of your provider -- it connects to the database using `cfg.ConnectionString`, reads schema metadata (tables, columns, types), applies any `IExtendTypeMapping` extensions, and returns a `Schema` record that SqlHydra uses to generate F# types.
+
+The `SqlEmitter` property should be the fully-qualified constructor expression for your `ISqlEmitter` implementation (used in the generated `QueryContextFactory`).
+
+#### Running with a Custom Provider
+
+Add your provider project as a `ProjectReference` (or publish it as a NuGet package and add a `PackageReference`), build your project, then run:
+
+```bash
+dotnet sqlhydra custom --provider-assembly MyDuckDbProvider --toml-file sqlhydra-duckdb.toml
+```
+
+SqlHydra will load your assembly from the project's build output and discover the `ISqlHydraDbProvider` implementation automatically.
+
+### Overriding Database Type Mappings
+
 SqlHydra supports type mapping extensions via the `IExtendTypeMapping` interface in `SqlHydra.Domain`. This lets you add custom database-to-CLR type mappings that SqlHydra doesn't handle out of the box.
 
-### How It Works
+#### How It Works
 
 When `SqlHydra.Cli` runs, it automatically scans your target project's build output for types implementing `IExtendTypeMapping`. Your extension wraps the built-in type mapping function, giving you a chance to handle custom types before falling back to the default behavior.
 
-### Implementing an Extension in Your Project
+#### Implementing an Extension in Your Project
 
 Add a class implementing `IExtendTypeMapping` anywhere in your project:
 
@@ -735,7 +777,7 @@ That's it -- no configuration needed. The next time you run `dotnet sqlhydra`, y
 
 > **Note:** Make sure your project is built before running `sqlhydra` so the extension can be discovered.
 
-### The TypeMappingContext
+#### The TypeMappingContext
 
 Your extension receives a `TypeMappingContext` with full schema metadata for the column being mapped:
 
@@ -749,7 +791,7 @@ type TypeMappingContext =
 
 This lets you make mapping decisions based on the table name, column name, schema, or any other metadata -- not just the provider type name.
 
-### Creating a NuGet Extension Package
+#### Creating a NuGet Extension Package
 
 If a type mapping extension is published as a NuGet package (e.g. `SqlHydra.Query.PgVector`), add it as a `PackageReference` in your project and then register it in your TOML configuration:
 
@@ -760,7 +802,7 @@ type_mappings = ["SqlHydra.Query.PgVector"]
 
 SqlHydra will resolve the assembly from your project's build output and load any `IExtendTypeMapping` implementations it finds.
 
-### Multiple Extensions
+#### Multiple Extensions
 
 Multiple extensions compose in order -- each wraps the previous one. An extension should call `baseTryFind ctx` for any types it doesn't handle, allowing the next extension (or the built-in mappings) to take over.
 
