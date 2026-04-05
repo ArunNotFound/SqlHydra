@@ -133,23 +133,10 @@ namespace {{cfg.Namespace}}
                     newLine
         }
 
-    if cfg.Readers.IsSome then
-        $"""
-[<System.Obsolete("The HydraReader module is no longer needed and will be removed in v4.0.")>]
-type HydraReader = 
-    static member Read(reader: Microsoft.Data.SqlClient.SqlDataReader) : (unit -> 'T) =
-        Hydration.buildRowReader<'T> Domain.ProviderType.{provider.Type} reader
-        """
-
     // If the user configures ProviderDbTypeAttributes, we know they are using SqlHydra.Query.
     if cfg.ProviderDbTypeAttributes then
         let emitter = provider.SqlEmitter
         let connectionType = provider.ProviderConnectionType
-
-        $"""
-[<System.Obsolete("The HydraBuilders module is no longer needed and will be removed in v4.0.")>]
-module HydraBuilders = ()
-        """
 
         if provider.Type = ProviderType.Npgsql then
             $"""

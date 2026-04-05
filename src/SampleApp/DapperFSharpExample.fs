@@ -15,9 +15,9 @@ let connect() =
     conn
 
 // Tables
-let customerTable =         table<Sales.Customer>         |> inSchema (nameof Sales)
-let orderHeaderTable =      table<Sales.SalesOrderHeader> |> inSchema (nameof Sales)
-let orderDetailTable =      table<Sales.SalesOrderDetail> |> inSchema (nameof Sales)
+let customerTable =         table<Sales.Customer>
+let orderHeaderTable =      table<Sales.SalesOrderHeader>
+let orderDetailTable =      table<Sales.SalesOrderDetail>
 
 let getTop10Customers(conn: IDbConnection) = 
     select {

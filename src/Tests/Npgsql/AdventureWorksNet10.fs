@@ -3213,17 +3213,6 @@ module sales =
     let vstorewithdemographics = table<vstorewithdemographics>
 
 
-[<System.Obsolete("The HydraReader module is no longer needed and will be removed in v4.0.")>]
-type HydraReader =
-    static member Read(reader: Microsoft.Data.SqlClient.SqlDataReader) : (unit -> 'T) =
-        Hydration.buildRowReader<'T> Domain.ProviderType.Npgsql reader
-
-
-[<System.Obsolete("The HydraBuilders module is no longer needed and will be removed in v4.0.")>]
-module HydraBuilders =
-    ()
-
-
 type QueryContextFactory =
     { OpenContext: unit -> QueryContext
       OpenContextAsync: unit -> System.Threading.Tasks.Task<QueryContext> }
