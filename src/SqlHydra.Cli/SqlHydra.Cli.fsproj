@@ -24,6 +24,7 @@
 	</PropertyGroup>
 
 	<ItemGroup>
+		<Content Include="Properties\launchSettings.json" />
 		<Compile Include="SchemaFilters.fs" />
 		<Compile Include="SqlServer\SqlServerDataTypes.fs" />
 		<Compile Include="SqlServer\SqlServerSchemaProvider.fs" />

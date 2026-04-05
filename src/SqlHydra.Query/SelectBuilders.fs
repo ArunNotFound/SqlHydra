@@ -112,7 +112,6 @@ type SelectBuilder<'Selected, 'Mapped> () =
     member val MapFn = Option<Func<'Selected, 'Mapped>>.None with get, set
     member val CancellationToken = CancellationToken.None with get, set
     member val private PendingJoinInfo = Option<PendingJoin>.None with get, set
-    member val internal SelectExprInfo = Option<SelectExprVisitors.SelectExprInfo>.None with get, set
 
     member this.For (state: QuerySource<'T>, [<ReflectedDefinition>] forExpr: FSharp.Quotations.Expr<'T -> QuerySource<'T>>) =
         let tableAlias = QuotationVisitor.visitFor forExpr
@@ -163,34 +162,6 @@ type SelectBuilder<'Selected, 'Mapped> () =
             ) state.Query
 
         QuerySource<'Selected, SelectQueryIR>(irWithSelectedColumns, state.TableMappings)
-
-    /// Future v4.0 enhancement.
-    /// Sets the SELECT statement using an arbitrary F# expression.
-    /// Supports string interpolation, conditionals, and other F# expressions that reference DB columns.
-    //[<CustomOperation("select", MaintainsVariableSpace = true, AllowIntoPattern = true)>]
-    //member this.SelectExpr (state: QuerySource<'T, SelectQueryIR>, [<ProjectionParameter>] selectExpression: Expression<Func<'T, 'Selected>>) =
-    //    let exprInfo = SelectExprVisitors.visitSelectExpr<'T, 'Selected> selectExpression
-
-    //    // Collect aliases that have a TableLeaf (full record); suppress individual ColumnLeafs for those aliases
-    //    let tableLeafAliases =
-    //        exprInfo.Leaves
-    //        |> List.choose (function
-    //            | SelectExprVisitors.TableLeaf (tableAlias, _, _) -> Some tableAlias
-    //            | _ -> None)
-    //        |> Set.ofList
-
-    //    let irWithSelectedColumns =
-    //        exprInfo.Leaves
-    //        |> List.fold (fun (ir: SelectQueryIR) leaf ->
-    //            match leaf with
-    //            | SelectExprVisitors.TableLeaf (tableAlias, _, _) -> { ir with Select = ir.Select @ [AllColumns tableAlias] }
-    //            | SelectExprVisitors.ColumnLeaf (tableAlias, _, _, _, _, _) when tableLeafAliases.Contains(tableAlias) -> ir // Suppressed by TableLeaf
-    //            | SelectExprVisitors.ColumnLeaf (tableAlias, column, _, _, _, _) -> { ir with Select = ir.Select @ [SpecificColumn $"%s{tableAlias}.%s{column}"] }
-    //            | SelectExprVisitors.SqlExprLeaf (sqlFragment, _, alias, _) -> { ir with Select = ir.Select @ [RawColumn $"{sqlFragment} AS {alias}"] }
-    //        ) state.Query
-
-    //    this.SelectExprInfo <- Some exprInfo
-    //    QuerySource<'Selected, SelectQueryIR>(irWithSelectedColumns, state.TableMappings)
 
     /// Sets the ORDER BY for single column
     [<CustomOperation("orderBy", MaintainsVariableSpace = true)>]
@@ -597,113 +568,45 @@ type SelectTaskBuilder<'Selected, 'Mapped> (ct: ContextType) =
                 ContextUtils.disposeIfNotShared ct ctx
         }
 
-    member private this.RunSelectExpr(query: SelectQueryIR, exprInfo: SelectExprVisitors.SelectExprInfo, resultModifier) =
-        task {
-            let! ctx = ContextUtils.getContext ct
-            try
-                use cmd = ctx.BuildCommand(query)
-                use! reader = cmd.ExecuteReaderAsync(this.CancellationToken)
-                let readRow = Hydration.buildSelectExprReader ctx.Provider reader exprInfo
-
-                let results = ResizeArray<'Selected>()
-                let! hasMore = reader.ReadAsync(this.CancellationToken)
-                let mutable hasMore = hasMore
-                while hasMore do
-                    let fields = readRow()
-                    let result = exprInfo.CompiledMapper.Invoke(fields) :?> 'Selected
-                    results.Add(result)
-                    let! hasMore' = reader.ReadAsync(this.CancellationToken)
-                    hasMore <- hasMore'
-
-                return results :> seq<'Selected> |> resultModifier
-            finally
-                ContextUtils.disposeIfNotShared ct ctx
-        }
-
-    member private this.RunSelectExprMapped(query: SelectQueryIR, exprInfo: SelectExprVisitors.SelectExprInfo, resultModifier) =
-        task {
-            let! ctx = ContextUtils.getContext ct
-            try
-                use cmd = ctx.BuildCommand(query)
-                use! reader = cmd.ExecuteReaderAsync(this.CancellationToken)
-                let readRow = Hydration.buildSelectExprReader ctx.Provider reader exprInfo
-
-                let results = ResizeArray<'Mapped>()
-                let! hasMore = reader.ReadAsync(this.CancellationToken)
-                let mutable hasMore = hasMore
-                while hasMore do
-                    let fields = readRow()
-                    let selected = exprInfo.CompiledMapper.Invoke(fields) :?> 'Selected
-                    results.Add(this.MapFn.Value.Invoke(selected))
-                    let! hasMore' = reader.ReadAsync(this.CancellationToken)
-                    hasMore <- hasMore'
-
-                return results :> seq<'Mapped> |> resultModifier
-            finally
-                ContextUtils.disposeIfNotShared ct ctx
-        }
-
     /// Run: default
-    /// Called when no mapSeq, mapArray or mapList is present;
-    /// this input will always be 'Selected -- even if select is not present.
     member this.Run(state: QuerySource<'Selected, SelectQueryIR>) =
-        match this.SelectExprInfo with
-        | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, id)
-        | None -> this.RunSelected(state.Query, id)
+        this.RunSelected(state.Query, id)
 
     /// Run: toList
     member this.Run(state: QuerySource<'Selected list, SelectQueryIR>) =
-        match this.SelectExprInfo with
-        | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.toList)
-        | None -> this.RunSelected(state.Query, Seq.toList)
+        this.RunSelected(state.Query, Seq.toList)
 
     /// Run: toArray
     member this.Run(state: QuerySource<'Selected array, SelectQueryIR>) =
-        match this.SelectExprInfo with
-        | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.toArray)
-        | None -> this.RunSelected(state.Query, Seq.toArray)
+        this.RunSelected(state.Query, Seq.toArray)
 
     /// Run: mapList
     member this.Run(state: QuerySource<'Mapped list, SelectQueryIR>) =
-        match this.SelectExprInfo with
-        | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.toList)
-        | None -> this.RunMapped(state.Query, Seq.toList)
+        this.RunMapped(state.Query, Seq.toList)
 
     // Run: mapArray
     member this.Run(state: QuerySource<'Mapped array, SelectQueryIR>) =
-        match this.SelectExprInfo with
-        | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.toArray)
-        | None -> this.RunMapped(state.Query, Seq.toArray)
+        this.RunMapped(state.Query, Seq.toArray)
 
     // Run: mapSeq
     member this.Run(state: QuerySource<'Mapped seq, SelectQueryIR>) =
-        match this.SelectExprInfo with
-        | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, id)
-        | None -> this.RunMapped(state.Query, id)
+        this.RunMapped(state.Query, id)
 
     // Run: tryHead - 'Selected
     member this.Run(state: QuerySource<'Selected option, SelectQueryIR>) =
-        match this.SelectExprInfo with
-        | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.tryHead)
-        | None -> this.RunSelected(state.Query, Seq.tryHead)
+        this.RunSelected(state.Query, Seq.tryHead)
 
     // Run: tryHead - 'Mapped
     member this.Run(state: QuerySource<'Mapped option, SelectQueryIR>) =
-        match this.SelectExprInfo with
-        | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.tryHead)
-        | None -> this.RunMapped(state.Query, Seq.tryHead)
+        this.RunMapped(state.Query, Seq.tryHead)
 
     // Run: head - 'Selected
     member this.Run(state: QuerySource<ResultModifier.Head<'Selected>, SelectQueryIR>) =
-        match this.SelectExprInfo with
-        | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.head)
-        | None -> this.RunSelected(state.Query, Seq.head)
+        this.RunSelected(state.Query, Seq.head)
 
     // Run: head - 'Mapped
     member this.Run(state: QuerySource<ResultModifier.Head<'Mapped>, SelectQueryIR>) =
-        match this.SelectExprInfo with
-        | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.head)
-        | None -> this.RunMapped(state.Query, Seq.head)
+        this.RunMapped(state.Query, Seq.head)
 
     // Run: count
     member this.Run(state: QuerySource<ResultModifier.Count<int>, SelectQueryIR>) =
@@ -764,117 +667,45 @@ type SelectAsyncBuilder<'Selected, 'Mapped> (ct: ContextType) =
                 ContextUtils.disposeIfNotShared ct ctx
         }
 
-    member private this.RunSelectExpr(query: SelectQueryIR, exprInfo: SelectExprVisitors.SelectExprInfo, resultModifier) =
-        async {
-            let! ctx = ContextUtils.getContext ct |> Async.AwaitTask
-            try
-                use cmd = ctx.BuildCommand(query)
-                let! asyncCancel = Async.CancellationToken
-                let cancel = if this.CancellationToken <> CancellationToken.None then this.CancellationToken else asyncCancel
-                use! reader = cmd.ExecuteReaderAsync(cancel) |> Async.AwaitTask
-                let readRow = Hydration.buildSelectExprReader ctx.Provider (reader : DbDataReader) exprInfo
-
-                let results = ResizeArray<'Selected>()
-                let! hasMore = reader.ReadAsync(cancel) |> Async.AwaitTask
-                let mutable hasMore = hasMore
-                while hasMore do
-                    let fields = readRow()
-                    let result = exprInfo.CompiledMapper.Invoke(fields) :?> 'Selected
-                    results.Add(result)
-                    let! hasMore' = reader.ReadAsync(cancel) |> Async.AwaitTask
-                    hasMore <- hasMore'
-
-                return results :> seq<'Selected> |> resultModifier
-            finally
-                ContextUtils.disposeIfNotShared ct ctx
-        }
-
-    member private this.RunSelectExprMapped(query: SelectQueryIR, exprInfo: SelectExprVisitors.SelectExprInfo, resultModifier) =
-        async {
-            let! ctx = ContextUtils.getContext ct |> Async.AwaitTask
-            try
-                use cmd = ctx.BuildCommand(query)
-                let! asyncCancel = Async.CancellationToken
-                let cancel = if this.CancellationToken <> CancellationToken.None then this.CancellationToken else asyncCancel
-                use! reader = cmd.ExecuteReaderAsync(cancel) |> Async.AwaitTask
-                let readRow = Hydration.buildSelectExprReader ctx.Provider (reader : DbDataReader) exprInfo
-
-                let results = ResizeArray<'Mapped>()
-                let! hasMore = reader.ReadAsync(cancel) |> Async.AwaitTask
-                let mutable hasMore = hasMore
-                while hasMore do
-                    let fields = readRow()
-                    let selected = exprInfo.CompiledMapper.Invoke(fields) :?> 'Selected
-                    results.Add(this.MapFn.Value.Invoke(selected))
-                    let! hasMore' = reader.ReadAsync(cancel) |> Async.AwaitTask
-                    hasMore <- hasMore'
-
-                return results :> seq<'Mapped> |> resultModifier
-            finally
-                ContextUtils.disposeIfNotShared ct ctx
-        }
-
     /// Run: default
-    /// Called when no mapSeq, mapArray or mapList is present;
-    /// this input will always be 'Selected -- even if select is not present.
     member this.Run(state: QuerySource<'Selected, SelectQueryIR>) =
-        match this.SelectExprInfo with
-        | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, id)
-        | None -> this.RunSelected(state.Query, id)
+        this.RunSelected(state.Query, id)
 
     /// Run: toList
     member this.Run(state: QuerySource<'Selected list, SelectQueryIR>) =
-        match this.SelectExprInfo with
-        | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.toList)
-        | None -> this.RunSelected(state.Query, Seq.toList)
+        this.RunSelected(state.Query, Seq.toList)
 
     /// Run: toArray
     member this.Run(state: QuerySource<'Selected array, SelectQueryIR>) =
-        match this.SelectExprInfo with
-        | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.toArray)
-        | None -> this.RunSelected(state.Query, Seq.toArray)
+        this.RunSelected(state.Query, Seq.toArray)
 
     /// Run: mapList
     member this.Run(state: QuerySource<'Mapped list, SelectQueryIR>) =
-        match this.SelectExprInfo with
-        | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.toList)
-        | None -> this.RunMapped(state.Query, Seq.toList)
+        this.RunMapped(state.Query, Seq.toList)
 
     // Run: mapArray
     member this.Run(state: QuerySource<'Mapped array, SelectQueryIR>) =
-        match this.SelectExprInfo with
-        | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.toArray)
-        | None -> this.RunMapped(state.Query, Seq.toArray)
+        this.RunMapped(state.Query, Seq.toArray)
 
     // Run: mapSeq
     member this.Run(state: QuerySource<'Mapped seq, SelectQueryIR>) =
-        match this.SelectExprInfo with
-        | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, id)
-        | None -> this.RunMapped(state.Query, id)
+        this.RunMapped(state.Query, id)
 
     // Run: tryHead - 'Selected
     member this.Run(state: QuerySource<'Selected option, SelectQueryIR>) =
-        match this.SelectExprInfo with
-        | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.tryHead)
-        | None -> this.RunSelected(state.Query, Seq.tryHead)
+        this.RunSelected(state.Query, Seq.tryHead)
 
     // Run: tryHead - 'Mapped
     member this.Run(state: QuerySource<'Mapped option, SelectQueryIR>) =
-        match this.SelectExprInfo with
-        | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.tryHead)
-        | None -> this.RunMapped(state.Query, Seq.tryHead)
+        this.RunMapped(state.Query, Seq.tryHead)
 
     // Run: head - 'Selected
     member this.Run(state: QuerySource<ResultModifier.Head<'Selected>, SelectQueryIR>) =
-        match this.SelectExprInfo with
-        | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.head)
-        | None -> this.RunSelected(state.Query, Seq.head)
+        this.RunSelected(state.Query, Seq.head)
 
     // Run: head - 'Mapped
     member this.Run(state: QuerySource<ResultModifier.Head<'Mapped>, SelectQueryIR>) =
-        match this.SelectExprInfo with
-        | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.head)
-        | None -> this.RunMapped(state.Query, Seq.head)
+        this.RunMapped(state.Query, Seq.head)
 
     // Run: count
     member this.Run(state: QuerySource<ResultModifier.Count<int>, SelectQueryIR>) =
