@@ -717,7 +717,7 @@ open SqlHydra.Domain
 type DuckDbProvider() =
     interface ISqlHydraDbProvider with
         member _.Id = "duckdb"
-        member _.Name = "SqlHydra.DuckDb"
+        member _.Name = "SqlHydra.DuckDB"
         member _.Type = Custom "DuckDb"
         member _.DefaultReaderType = "System.Data.Common.DbDataReader"
         member _.DefaultProvider = "DuckDB.NET.Data"
@@ -738,22 +738,18 @@ The `SqlEmitter` property should be the fully-qualified constructor expression f
 Add your provider project as a `ProjectReference` (or publish it as a NuGet package and add a `PackageReference`), build your project, then run:
 
 ```bash
-dotnet sqlhydra custom --provider-assembly MyDuckDbProvider --toml-file sqlhydra-duckdb.toml
+dotnet sqlhydra custom SqlHydra.Query.DuckDB --toml-file sqlhydra-duckdb.toml
 ```
 
-SqlHydra will load your assembly from the project's build output and discover the `ISqlHydraDbProvider` implementation automatically.
+SqlHydra will load the named assembly from the project's build output and discover the `ISqlHydraDbProvider` implementation automatically.
 
 ### Overriding Database Type Mappings
 
 SqlHydra supports type mapping extensions via the `IExtendTypeMapping` interface in `SqlHydra.Domain`. This lets you add custom database-to-CLR type mappings that SqlHydra doesn't handle out of the box.
 
-#### How It Works
+#### Implementing a Type Mapping Extension
 
-When `SqlHydra.Cli` runs, it automatically scans your target project's build output for types implementing `IExtendTypeMapping`. Your extension wraps the built-in type mapping function, giving you a chance to handle custom types before falling back to the default behavior.
-
-#### Implementing an Extension in Your Project
-
-Add a class implementing `IExtendTypeMapping` anywhere in your project:
+Add a class implementing `IExtendTypeMapping` in your project (or in a separate library):
 
 ```fsharp
 open SqlHydra.Domain
@@ -773,9 +769,20 @@ type MyCustomMapping() =
                 | _ -> baseTryFind ctx
 ```
 
-That's it -- no configuration needed. The next time you run `dotnet sqlhydra`, your extension will be discovered automatically from your project's build output.
+Your extension wraps the built-in type mapping function, giving you a chance to handle custom types before falling back to the default behavior.
 
-> **Note:** Make sure your project is built before running `sqlhydra` so the extension can be discovered.
+#### Registering the Extension
+
+Type mapping extensions must be explicitly registered in your TOML configuration. The name should match your project name, `PackageReference`, or `ProjectReference`:
+
+```toml
+[extensions]
+type_mappings = ["MyProject"]
+```
+
+This gives you control over which providers use which extensions. For example, if you only want a custom mapping applied to SQLite, add it to `sqlhydra-sqlite.toml` but not to `sqlhydra-mssql.toml`.
+
+> **Note:** Make sure your project is built before running `sqlhydra` so the extension assembly can be found.
 
 #### The TypeMappingContext
 
@@ -791,9 +798,9 @@ type TypeMappingContext =
 
 This lets you make mapping decisions based on the table name, column name, schema, or any other metadata -- not just the provider type name.
 
-#### Creating a NuGet Extension Package
+#### NuGet Extension Packages
 
-If a type mapping extension is published as a NuGet package (e.g. `SqlHydra.Query.PgVector`), add it as a `PackageReference` in your project and then register it in your TOML configuration:
+Type mapping extensions can also be published as NuGet packages. Add it as a `PackageReference` in your project and register it in your TOML configuration:
 
 ```toml
 [extensions]
