@@ -6,72 +6,96 @@ open Input
 open Console
 open Domain
 
-/// A resolved built-in provider, or a deferred custom provider that needs assembly loading.
-type ProviderArg =
-    | BuiltIn of ISqlHydraDbProvider
-    | Custom
-
-let run (providerArg: ProviderArg, tomlFile: IO.FileInfo option, project: IO.FileInfo option, connString: string option, providerAssembly: string option) =
-
-    let projectOrFirstFound =
-        project
-        |> Option.map (fun p -> if p.Exists then p else failwith $"Unable to find the specified project file: '{p.FullName}'.")
-        |> Option.orElse (IO.DirectoryInfo(".").EnumerateFiles("*.fsproj") |> Seq.tryHead)
-        |> Option.defaultWith (fun () -> failwith "Unable to find a .fsproj file in the run directory. Please specify one using the `--project` option.")
-
-    let provider =
-        match providerArg with
-        | BuiltIn p -> p
-        | Custom ->
-            match providerAssembly with
-            | Some asm -> Extensions.loadProvider projectOrFirstFound asm
-            | None -> failwith "The 'custom' provider requires the '--provider-assembly' option specifying the assembly containing an ISqlHydraDbProvider implementation."
-
+let run (provider: ISqlHydraDbProvider) (tomlFile: IO.FileInfo option, project: IO.FileInfo, connString: string option) =
     let tomlFile = defaultArg tomlFile (IO.FileInfo($"sqlhydra-{provider.Id}.toml"))
 
     {
         Provider = provider
         TomlFile = tomlFile
-        Project = projectOrFirstFound
+        Project = project
         Version = Version.get()
         ConnectionString = connString
     }
     |> Console.run
 
+[<AutoOpen>]
+module Options =
+    let tomlFile =
+        optionMaybe<IO.FileInfo> "--toml-file"
+        |> alias "-t"
+        |> desc "The toml configuration filename. Default: 'sqlhydra-{provider}.toml'"
+
+    let project =
+        option<IO.FileInfo> "--project"
+        |> alias "-p"
+        |> desc "The project file to update. If not configured, the first .fsproj found in the run directory will be used."
+        |> defaultValueFactory (fun _ ->
+            IO.DirectoryInfo(".").EnumerateFiles("*.fsproj") 
+            |> Seq.tryHead
+            |> Option.defaultWith (fun () -> failwith "Unable to find a .fsproj file in the run directory. Please specify one using the `--project` option.")
+        )
+
+    let connectionString =
+        optionMaybe<string> "--connection-string"
+        |> alias "-cs"
+        |> desc "The DB connection string to use. This will override the connection string in the toml file."
+
+[<AutoOpen>]
+module Commands = 
+    let mssql = 
+        command "mssql" {
+            description "Use the built-in SQL Server provider."
+            inputs (tomlFile, project, connectionString)
+            setAction (run SqlServer.Provider.instance)
+        }
+
+    let npgsql = 
+        command "npgsql" {
+            description "Use the built-in PostgreSQL provider."
+            inputs (tomlFile, project, connectionString)
+            setAction (run Npgsql.Provider.instance)
+        }
+
+    let sqlite = 
+        command "sqlite" {
+            description "Use the built-in SQLite provider."
+            inputs (tomlFile, project, connectionString)
+            setAction (run Sqlite.Provider.instance)
+        }
+
+    let mysql = 
+        command "mysql" {
+            description "Use the built-in MySQL provider."
+            inputs (tomlFile, project, connectionString)
+            setAction (run MySql.Provider.instance)
+        }
+
+    let oracle =
+        command "oracle" {
+            description "Use the built-in Oracle provider."
+            inputs (tomlFile, project, connectionString)
+            setAction (run Oracle.Provider.instance)
+        }
+
+    let custom =
+        let providerName = 
+            argument<string> "providerName" 
+            |> desc "The name used to locate your custom provider. This is usually the name of the project, ProjectReference, or PackageReference that contains your provider implementation."
+
+        command "custom" {
+            description "Use a custom provider implemented in the target project or its referenced assemblies."
+            inputs (providerName, tomlFile, project, connectionString)
+            setAction (fun (providerName, tomlFile, project, connectionString) -> 
+                let provider = Extensions.loadProvider project providerName
+                run (provider) (tomlFile, project, connectionString)
+            )
+        }
+
 [<EntryPoint>]
 let main argv =
     rootCommand argv {
         description "SqlHydra.Cli"
-        inputs (
-            argument "provider"
-            |> required
-            |> desc "The database provider id (e.g. 'mssql', 'npgsql', 'sqlite', 'mysql', 'oracle', 'custom')"
-            |> tryParse (fun res ->
-                match res.Tokens[0].Value with
-                | "mssql" ->  Ok (BuiltIn SqlServer.Provider.instance)
-                | "npgsql" -> Ok (BuiltIn Npgsql.Provider.instance)
-                | "sqlite" -> Ok (BuiltIn Sqlite.Provider.instance)
-                | "mysql" ->  Ok (BuiltIn MySql.Provider.instance)
-                | "oracle" -> Ok (BuiltIn Oracle.Provider.instance)
-                | "custom" -> Ok Custom
-                | providerId -> Error $"Invalid provider id: '{providerId}'. Valid options are: 'mssql', 'npgsql', 'sqlite', 'mysql', 'oracle', or 'custom'."
-            ),
-
-            optionMaybe "--toml-file"
-            |> alias "-t"
-            |> desc "The toml configuration filename. Default: 'sqlhydra-{provider}.toml'",
-
-            optionMaybe "--project"
-            |> alias "-p"
-            |> desc "The project file to update. If not configured, the first .fsproj found in the run directory will be used.",
-
-            optionMaybe "--connection-string"
-            |> alias "-cs"
-            |> desc "The DB connection string to use. This will override the connection string in the toml file.",
-
-            optionMaybe "--provider-assembly"
-            |> alias "-pa"
-            |> desc "The assembly name containing a custom ISqlHydraDbProvider implementation. Required when using the 'custom' provider."
-        )
-        setAction run
+        inputs context
+        helpAction
+        addCommands [ mssql; npgsql; sqlite; mysql; oracle; custom ]
     }
