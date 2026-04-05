@@ -112,6 +112,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
     member val MapFn = Option<Func<'Selected, 'Mapped>>.None with get, set
     member val CancellationToken = CancellationToken.None with get, set
     member val private PendingJoinInfo = Option<PendingJoin>.None with get, set
+    member val internal SelectExprInfo = Option<SelectExprVisitors.SelectExprInfo>.None with get, set
 
     member this.For (state: QuerySource<'T>, [<ReflectedDefinition>] forExpr: FSharp.Quotations.Expr<'T -> QuerySource<'T>>) =
         let tableAlias = QuotationVisitor.visitFor forExpr
@@ -188,7 +189,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
     //            | SelectExprVisitors.SqlExprLeaf (sqlFragment, _, alias, _) -> { ir with Select = ir.Select @ [RawColumn $"{sqlFragment} AS {alias}"] }
     //        ) state.Query
 
-    //    SelectExprVisitors.SelectExprStore.set (box irWithSelectedColumns) exprInfo
+    //    this.SelectExprInfo <- Some exprInfo
     //    QuerySource<'Selected, SelectQueryIR>(irWithSelectedColumns, state.TableMappings)
 
     /// Sets the ORDER BY for single column
@@ -646,61 +647,61 @@ type SelectTaskBuilder<'Selected, 'Mapped> (ct: ContextType) =
     /// Called when no mapSeq, mapArray or mapList is present;
     /// this input will always be 'Selected -- even if select is not present.
     member this.Run(state: QuerySource<'Selected, SelectQueryIR>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
+        match this.SelectExprInfo with
         | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, id)
         | None -> this.RunSelected(state.Query, id)
 
     /// Run: toList
     member this.Run(state: QuerySource<'Selected list, SelectQueryIR>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
+        match this.SelectExprInfo with
         | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.toList)
         | None -> this.RunSelected(state.Query, Seq.toList)
 
     /// Run: toArray
     member this.Run(state: QuerySource<'Selected array, SelectQueryIR>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
+        match this.SelectExprInfo with
         | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.toArray)
         | None -> this.RunSelected(state.Query, Seq.toArray)
 
     /// Run: mapList
     member this.Run(state: QuerySource<'Mapped list, SelectQueryIR>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
+        match this.SelectExprInfo with
         | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.toList)
         | None -> this.RunMapped(state.Query, Seq.toList)
 
     // Run: mapArray
     member this.Run(state: QuerySource<'Mapped array, SelectQueryIR>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
+        match this.SelectExprInfo with
         | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.toArray)
         | None -> this.RunMapped(state.Query, Seq.toArray)
 
     // Run: mapSeq
     member this.Run(state: QuerySource<'Mapped seq, SelectQueryIR>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
+        match this.SelectExprInfo with
         | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, id)
         | None -> this.RunMapped(state.Query, id)
 
     // Run: tryHead - 'Selected
     member this.Run(state: QuerySource<'Selected option, SelectQueryIR>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
+        match this.SelectExprInfo with
         | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.tryHead)
         | None -> this.RunSelected(state.Query, Seq.tryHead)
 
     // Run: tryHead - 'Mapped
     member this.Run(state: QuerySource<'Mapped option, SelectQueryIR>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
+        match this.SelectExprInfo with
         | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.tryHead)
         | None -> this.RunMapped(state.Query, Seq.tryHead)
 
     // Run: head - 'Selected
     member this.Run(state: QuerySource<ResultModifier.Head<'Selected>, SelectQueryIR>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
+        match this.SelectExprInfo with
         | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.head)
         | None -> this.RunSelected(state.Query, Seq.head)
 
     // Run: head - 'Mapped
     member this.Run(state: QuerySource<ResultModifier.Head<'Mapped>, SelectQueryIR>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
+        match this.SelectExprInfo with
         | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.head)
         | None -> this.RunMapped(state.Query, Seq.head)
 
@@ -817,61 +818,61 @@ type SelectAsyncBuilder<'Selected, 'Mapped> (ct: ContextType) =
     /// Called when no mapSeq, mapArray or mapList is present;
     /// this input will always be 'Selected -- even if select is not present.
     member this.Run(state: QuerySource<'Selected, SelectQueryIR>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
+        match this.SelectExprInfo with
         | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, id)
         | None -> this.RunSelected(state.Query, id)
 
     /// Run: toList
     member this.Run(state: QuerySource<'Selected list, SelectQueryIR>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
+        match this.SelectExprInfo with
         | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.toList)
         | None -> this.RunSelected(state.Query, Seq.toList)
 
     /// Run: toArray
     member this.Run(state: QuerySource<'Selected array, SelectQueryIR>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
+        match this.SelectExprInfo with
         | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.toArray)
         | None -> this.RunSelected(state.Query, Seq.toArray)
 
     /// Run: mapList
     member this.Run(state: QuerySource<'Mapped list, SelectQueryIR>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
+        match this.SelectExprInfo with
         | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.toList)
         | None -> this.RunMapped(state.Query, Seq.toList)
 
     // Run: mapArray
     member this.Run(state: QuerySource<'Mapped array, SelectQueryIR>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
+        match this.SelectExprInfo with
         | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.toArray)
         | None -> this.RunMapped(state.Query, Seq.toArray)
 
     // Run: mapSeq
     member this.Run(state: QuerySource<'Mapped seq, SelectQueryIR>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
+        match this.SelectExprInfo with
         | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, id)
         | None -> this.RunMapped(state.Query, id)
 
     // Run: tryHead - 'Selected
     member this.Run(state: QuerySource<'Selected option, SelectQueryIR>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
+        match this.SelectExprInfo with
         | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.tryHead)
         | None -> this.RunSelected(state.Query, Seq.tryHead)
 
     // Run: tryHead - 'Mapped
     member this.Run(state: QuerySource<'Mapped option, SelectQueryIR>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
+        match this.SelectExprInfo with
         | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.tryHead)
         | None -> this.RunMapped(state.Query, Seq.tryHead)
 
     // Run: head - 'Selected
     member this.Run(state: QuerySource<ResultModifier.Head<'Selected>, SelectQueryIR>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
+        match this.SelectExprInfo with
         | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.head)
         | None -> this.RunSelected(state.Query, Seq.head)
 
     // Run: head - 'Mapped
     member this.Run(state: QuerySource<ResultModifier.Head<'Mapped>, SelectQueryIR>) =
-        match SelectExprVisitors.SelectExprStore.tryGet(box state.Query) with
+        match this.SelectExprInfo with
         | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.head)
         | None -> this.RunMapped(state.Query, Seq.head)
 

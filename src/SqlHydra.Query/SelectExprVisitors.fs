@@ -23,20 +23,6 @@ type SelectExprInfo = {
     CompiledMapper: Func<obj[], obj>
 }
 
-module SelectExprStore =
-    open System.Runtime.CompilerServices
-
-    let private store = ConditionalWeakTable<obj, SelectExprInfo>()
-
-    let set (key: obj) (info: SelectExprInfo) =
-        store.Remove(key) |> ignore
-        store.Add(key, info)
-
-    let tryGet (key: obj) =
-        match store.TryGetValue(key) with
-        | true, info -> Some info
-        | _ -> None
-
 /// Tracks how each alias is used in the projection expression.
 type AliasUsage = {
     mutable RequiresFullRecord: bool
