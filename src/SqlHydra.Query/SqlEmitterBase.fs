@@ -131,6 +131,8 @@ type SqlEmitterBase() =
             $"{this.QuoteColumn(col)} IS NULL"
         | IsNotNull col ->
             $"{this.QuoteColumn(col)} IS NOT NULL"
+        | InValues (col, values) when values.Length = 0 ->
+            "1=0"
         | InValues (col, values) ->
             let quotedCol = this.QuoteColumn(col)
             let paramNames = values |> Array.map (fun v -> collector.Add(v)) |> String.concat ", "
@@ -140,6 +142,8 @@ type SqlEmitterBase() =
             for (_, v) in compiled.Parameters do
                 collector.Add(v) |> ignore
             $"{this.QuoteColumn(col)} IN ({compiled.Sql})"
+        | NotInValues (col, values) when values.Length = 0 ->
+            "1=1"
         | NotInValues (col, values) ->
             let quotedCol = this.QuoteColumn(col)
             let paramNames = values |> Array.map (fun v -> collector.Add(v)) |> String.concat ", "

@@ -527,7 +527,42 @@ let ``Delete Query with Where``() =
     sql.Contains("WHERE ([Sales].[Customer].[CustomerID] NOT IN (@p0, @p1, @p2))") =! true
 
 [<Test>]
-let ``Delete All``() = 
+let ``Empty In List``() =
+    let emptyIds: int list = []
+
+    // Select with empty IN list
+    let selectSql =
+        select {
+            for c in Sales.Customer do
+            where (c.CustomerID |=| emptyIds)
+        }
+        |> toSql
+
+    selectSql.Contains("IN ()") =! false
+
+    // Update with empty IN list
+    let updateSql =
+        update {
+            for c in Sales.Customer do
+            set c.AccountNumber "123"
+            where (c.CustomerID |=| emptyIds)
+        }
+        |> toUpdateSql
+
+    updateSql.Contains("IN ()") =! false
+
+    // Delete with empty IN list
+    let deleteSql =
+        delete {
+            for c in Sales.Customer do
+            where (c.CustomerID |=| emptyIds)
+        }
+        |> toSql
+
+    deleteSql.Contains("IN ()") =! false
+
+[<Test>]
+let ``Delete All``() =
     let sql =  
         delete {
             for c in Sales.Customer do
