@@ -78,4 +78,10 @@ let typeMappingsByName isLegacy =
 let tryFindTypeMapping isLegacy =
     let map = typeMappingsByName isLegacy
     fun (ctx: TypeMappingContext) ->
-        map.TryFind (ctx.Column.ProviderTypeName.ToLower().Trim())
+        let fullName = ctx.Column.ProviderTypeName.ToLower().Trim()
+        // Strip any parenthesized arguments (e.g. "INTEGER IDENTITY (1, 1)" -> "integer identity",
+        // "VARCHAR(255)" -> "varchar") to match the type map keys.
+        let normalizedName =
+            let idx = fullName.IndexOf('(')
+            if idx >= 0 then fullName.[..idx-1].Trim() else fullName
+        map.TryFind normalizedName
