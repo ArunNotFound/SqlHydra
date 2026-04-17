@@ -22,6 +22,7 @@ let private withTempSqliteDb (ddl: string) (assertion: string -> unit) =
 
         assertion connectionString
     finally
+        SqliteConnection.ClearAllPools()
         if File.Exists(dbPath) then
             File.Delete(dbPath)
 
