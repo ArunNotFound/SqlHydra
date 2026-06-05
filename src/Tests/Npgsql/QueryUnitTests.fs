@@ -266,6 +266,29 @@ let ``Correlated Subquery``() =
         WHERE (\"d\".\"customerid\" = \"od\".\"customerid\")))".RemoveHydraExpr()
 
 [<Test>]
+let ``Correlated subquery with differing for and correlate tables uses the for source``() =
+    // When the `for` source and `correlate` target are different tables, the merged Root
+    // keys previously collapsed and the inner subquery FROM wrongly referenced the correlate
+    // target instead of the `for` source (SelectBuilder.Correlate).
+    let inner =
+        select {
+            for d in sales.salesorderdetail do
+            correlate h in sales.salesorderheader
+            where (d.salesorderid = h.salesorderid)
+            select (maxBy d.orderqty)
+        }
+
+    let sql =
+        select {
+            for h in sales.salesorderheader do
+            where (h.revisionnumber = subqueryOne inner)
+            select h.salesorderid
+        }
+        |> toSql
+
+    sql.Contains("FROM \"sales\".\"salesorderdetail\"") =! true
+
+[<Test>]
 let ``Delete Query with Where``() = 
     let sql =  
         delete {
