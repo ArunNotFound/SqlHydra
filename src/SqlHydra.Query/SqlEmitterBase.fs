@@ -93,11 +93,11 @@ type SqlEmitterBase() =
         | Null -> "NULL"
         | ColumnRef col -> this.QuoteColumn(col)
         | SubQuery ir ->
-            let compiled = this.EmitSelectCore(ir)
-            // Merge sub-query parameters into outer collector
-            for (_, v) in compiled.Parameters do
-                collector.Add(v) |> ignore
-            $"({compiled.Sql})"
+            // Emit the subquery into the SAME collector so its parameters are named in the
+            // outer sequence. Compiling with a fresh collector would emit inner @p0.. names
+            // that collide with the outer query's params once merged (issue #134).
+            let sql = this.EmitSelectInto(ir, collector)
+            $"({sql})"
         | RawSql (fragment, parms) ->
             let mutable result = fragment
             for p in parms do
@@ -138,10 +138,8 @@ type SqlEmitterBase() =
             let paramNames = values |> Array.map (fun v -> collector.Add(v)) |> String.concat ", "
             $"{quotedCol} IN ({paramNames})"
         | InSubQuery (col, subquery) ->
-            let compiled = this.EmitSelectCore(subquery)
-            for (_, v) in compiled.Parameters do
-                collector.Add(v) |> ignore
-            $"{this.QuoteColumn(col)} IN ({compiled.Sql})"
+            let sql = this.EmitSelectInto(subquery, collector)
+            $"{this.QuoteColumn(col)} IN ({sql})"
         | NotInValues (col, values) when values.Length = 0 ->
             "1=1"
         | NotInValues (col, values) ->
@@ -149,10 +147,8 @@ type SqlEmitterBase() =
             let paramNames = values |> Array.map (fun v -> collector.Add(v)) |> String.concat ", "
             $"{quotedCol} NOT IN ({paramNames})"
         | NotInSubQuery (col, subquery) ->
-            let compiled = this.EmitSelectCore(subquery)
-            for (_, v) in compiled.Parameters do
-                collector.Add(v) |> ignore
-            $"{this.QuoteColumn(col)} NOT IN ({compiled.Sql})"
+            let sql = this.EmitSelectInto(subquery, collector)
+            $"{this.QuoteColumn(col)} NOT IN ({sql})"
         | Like (col, pattern) ->
             let quotedCol = this.QuoteColumn(col)
             let paramName = collector.Add(pattern)
@@ -188,9 +184,16 @@ type SqlEmitterBase() =
         let inner = this.EmitWhereInner(clause, collector)
         if inner = "" then "" else $"({inner})"
 
-    /// Emits a SELECT query to SQL.
+    /// Emits a SELECT query to SQL, allocating parameters in a fresh collector.
     member this.EmitSelectCore(ir: SelectQueryIR) : CompiledQuery =
         let collector = this.CreateCollector()
+        let sql = this.EmitSelectInto(ir, collector)
+        { Sql = sql; Parameters = collector.Parameters }
+
+    /// Emits a SELECT query to SQL using the supplied collector. Subqueries call this with the
+    /// outer collector so their parameter names are allocated in a single shared sequence,
+    /// avoiding the inner/outer @p name collisions that produced incorrect bindings (issue #134).
+    member this.EmitSelectInto(ir: SelectQueryIR, collector: ParameterCollector) : string =
         let sb = StringBuilder()
 
         // SELECT
@@ -263,7 +266,7 @@ type SqlEmitterBase() =
         // PAGINATION
         this.EmitPagination(ir.Skip, ir.Take, sb, collector)
 
-        { Sql = sb.ToString(); Parameters = collector.Parameters }
+        sb.ToString()
 
     /// Emits a single-row INSERT.
     member this.EmitSingleInsert(table: string, columns: string list, values: obj[], collector: ParameterCollector) =
