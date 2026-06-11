@@ -49,22 +49,28 @@ type QueryContext(conn: DbConnection, emitter: ISqlEmitter) =
 
     let mutable logger = fun (cq: CompiledQuery) -> ()
 
-    interface IDisposable with
-        member this.Dispose() =
-            conn.Dispose()
-            this.Transaction |> Option.iter (fun t -> t.Dispose())
+    member this.Dispose() =
+        conn.Dispose()
+        this.Transaction |> Option.iter (fun t -> t.Dispose())
+        this.Transaction <- None
+
+#if NETSTANDARD2_1_OR_GREATER
+    member this.DisposeAsync() =
+        task {
+            do! conn.DisposeAsync()
+            match this.Transaction with
+            | Some t -> do! t.DisposeAsync()
+            | None -> ()
             this.Transaction <- None
+        } |> ValueTask
+#endif
+
+    interface IDisposable with
+        member this.Dispose() = this.Dispose()
 
 #if NETSTANDARD2_1_OR_GREATER
     interface IAsyncDisposable with
-        member this.DisposeAsync() =
-            task {
-                do! conn.DisposeAsync()
-                match this.Transaction with
-                | Some t -> do! t.DisposeAsync()
-                | None -> ()
-                this.Transaction <- None
-            } |> ValueTask
+        member this.DisposeAsync() = this.DisposeAsync()
 #endif
 
     member this.Connection = conn
