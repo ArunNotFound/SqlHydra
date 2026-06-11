@@ -2,6 +2,13 @@ namespace SqlHydra.Query
 
 open System
 
+type CommandOptions =
+    {
+        /// The wait time before terminating the attempt to execute a command and generating an error.
+        CommandTimeout: TimeSpan option
+    }
+    static member Default = { CommandTimeout = None }
+
 /// Comparison operators used in WHERE/HAVING/ON clauses.
 type ComparisonOp =
     | Eq
@@ -124,6 +131,8 @@ and SelectQueryIR = {
     Distinct: bool
     /// SELECT COUNT(*) flag
     IsCount: bool
+    /// Options for the command executing the query.
+    CommandOptions: CommandOptions
 }
 
 /// Helpers for composing WhereClause values.
@@ -159,6 +168,7 @@ module SelectQueryIR =
         Take = None
         Distinct = false
         IsCount = false
+        CommandOptions = CommandOptions.Default
     }
 
 // ─── Insert-related types ───
@@ -191,6 +201,8 @@ type InsertQueryIR = {
     IdentityField: string option
     InsertType: InsertType
     OutputFields: OutputField list
+    /// Options for the command executing the query.
+    CommandOptions: CommandOptions
 }
 
 /// UPDATE query IR.
@@ -200,10 +212,14 @@ type UpdateQueryIR = {
     SetColumns: (string * obj) list
     Where: WhereClause
     OutputFields: OutputField list
+    /// Options for the command executing the query.
+    CommandOptions: CommandOptions
 }
 
 /// DELETE query IR.
 type DeleteQueryIR = {
     Table: string
     Where: WhereClause
+    /// Options for the command executing the query.
+    CommandOptions: CommandOptions
 }

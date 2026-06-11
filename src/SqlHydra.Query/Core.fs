@@ -76,9 +76,10 @@ type InsertQuerySpec<'T, 'Identity> =
         IdentityField: string option
         OutputFields: OutputField list
         InsertType: InsertType
+        CommandOptions: CommandOptions
     }
     static member Default : InsertQuerySpec<'T, 'Identity> =
-        { Table = ""; Entities = []; Fields = []; IdentityField = None; OutputFields = []; InsertType = Insert }
+        { Table = ""; Entities = []; Fields = []; IdentityField = None; OutputFields = []; InsertType = Insert; CommandOptions = CommandOptions.Default }
 
 type UpdateQuerySpec<'T, 'UpdateReturn> =
     {
@@ -89,9 +90,10 @@ type UpdateQuerySpec<'T, 'UpdateReturn> =
         Where: WhereClause
         OutputFields: OutputField list
         UpdateAll: bool
+        CommandOptions: CommandOptions
     }
     static member Default : UpdateQuerySpec<'T, 'UpdateReturn> =
-        { Table = ""; Entity = Option<'T>.None; Fields = []; SetValues = []; Where = WhereClause.Empty; OutputFields = []; UpdateAll = false }
+        { Table = ""; Entity = Option<'T>.None; Fields = []; SetValues = []; Where = WhereClause.Empty; OutputFields = []; UpdateAll = false; CommandOptions = CommandOptions.Default }
 
 type QuerySource<'T>(tableMappings) =
     interface IEnumerable<'T> with
@@ -201,6 +203,7 @@ module internal QueryUtils =
             SetColumns = kvps
             Where = spec.Where
             OutputFields = spec.OutputFields
+            CommandOptions = spec.CommandOptions
         }
 
     let fromInsert (spec: InsertQuerySpec<'T, 'InsertReturn>) : InsertQueryIR =
@@ -234,6 +237,7 @@ module internal QueryUtils =
                 IdentityField = spec.IdentityField
                 InsertType = spec.InsertType
                 OutputFields = spec.OutputFields
+                CommandOptions = spec.CommandOptions
             }
 
     /// Fails if `getId` identity field is used as an `onConflict` target.
