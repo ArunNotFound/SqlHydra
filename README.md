@@ -621,7 +621,7 @@ deleteTask db {
 
 ```fsharp
 let completeOrder (db: QueryContextFactory) orderId = task {
-    use! shared = db.CreateContextAsync()
+    use! shared = db.OpenContextAsync()
     shared.BeginTransaction()        
 
     // Update status for order
