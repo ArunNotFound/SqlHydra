@@ -188,7 +188,7 @@ type SqlEmitterBase() =
     member this.EmitSelectCore(ir: SelectQueryIR) : CompiledQuery =
         let collector = this.CreateCollector()
         let sql = this.EmitSelectInto(ir, collector)
-        { Sql = sql; Parameters = collector.Parameters }
+        { Sql = sql; Parameters = collector.Parameters; CommandOptions = ir.CommandOptions }
 
     /// Emits a SELECT query to SQL using the supplied collector. Subqueries call this with the
     /// outer collector so their parameter names are allocated in a single shared sequence,
@@ -295,7 +295,7 @@ type SqlEmitterBase() =
             else
                 withConflict
 
-        { Sql = withOutput; Parameters = collector.Parameters }
+        { Sql = withOutput; Parameters = collector.Parameters; CommandOptions = ir.CommandOptions }
 
     /// Emits an UPDATE query.
     member this.EmitUpdateCore(ir: UpdateQueryIR) : CompiledQuery =
@@ -328,7 +328,7 @@ type SqlEmitterBase() =
             else
                 baseSql
 
-        { Sql = withOutput; Parameters = collector.Parameters }
+        { Sql = withOutput; Parameters = collector.Parameters; CommandOptions = ir.CommandOptions }
 
     /// Emits a DELETE query.
     member this.EmitDeleteCore(ir: DeleteQueryIR) : CompiledQuery =
@@ -342,7 +342,7 @@ type SqlEmitterBase() =
         if whereSql <> "" then
             sb.Append($" WHERE {whereSql}") |> ignore
 
-        { Sql = sb.ToString(); Parameters = collector.Parameters }
+        { Sql = sb.ToString(); Parameters = collector.Parameters; CommandOptions = ir.CommandOptions }
 
     // Default implementations for abstract members
 

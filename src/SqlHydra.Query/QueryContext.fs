@@ -132,6 +132,11 @@ type QueryContext(conn: DbConnection, emitter: ISqlEmitter) =
     }
 #endif
 
+    member private this.ApplyCommandOptions (options: CommandOptions) (cmd: DbCommand) =
+        match options.CommandTimeout with
+        | Some timeout -> cmd.CommandTimeout <- timeout.TotalSeconds |> Math.Ceiling |> int
+        | None -> ()
+
     member private this.TrySetTransaction(cmd: DbCommand) =
         this.Transaction |> Option.iter (fun t -> cmd.Transaction <- t)
 
@@ -140,6 +145,7 @@ type QueryContext(conn: DbConnection, emitter: ISqlEmitter) =
         let log = defaultArg log true
         if log then this.Logger compiled
         let cmd = conn.CreateCommand()
+        cmd |> this.ApplyCommandOptions compiled.CommandOptions
         cmd |> this.TrySetTransaction
         cmd.CommandText <- compiled.Sql
         for (name, value) in compiled.Parameters do
@@ -263,6 +269,9 @@ type QueryContext(conn: DbConnection, emitter: ISqlEmitter) =
         let compiled = emitter.EmitInsert(insertIR)
         let cmd = this.BuildCommandFromCompiled(compiled, log = false)
 
+        let logCompiled () =
+            this.Logger { Sql = cmd.CommandText; Parameters = []; CommandOptions = iq.Spec.CommandOptions }
+
         // Handle InsertOrUpdateOnUnique separately (SQL Server TRY/CATCH pattern)
         match iq.Spec.InsertType with
         | InsertOrUpdateOnUnique (keyFields, updateFields) ->
@@ -275,7 +284,7 @@ type QueryContext(conn: DbConnection, emitter: ISqlEmitter) =
             cmd.CommandText <- newSql
             cmd.Parameters.Clear()
             for p in allParams do cmd.Parameters.Add(p) |> ignore
-            this.Logger { Sql = cmd.CommandText; Parameters = [] }
+            logCompiled ()
             cmd, ExecNonQuery
         | _ ->
 
@@ -298,7 +307,7 @@ type QueryContext(conn: DbConnection, emitter: ISqlEmitter) =
             elif provider = Sqlite then
                 cmd.CommandText <- cmd.CommandText + ";select last_insert_rowid() as id"
 
-            this.Logger { Sql = cmd.CommandText; Parameters = [] }
+            logCompiled ()
 
             // Setup Oracle identity output parameter
             if provider = Oracle then
@@ -312,11 +321,11 @@ type QueryContext(conn: DbConnection, emitter: ISqlEmitter) =
                 cmd, ExecScalar
 
         | { OutputFields = outputFields } when outputFields.Length > 0 ->
-            this.Logger { Sql = cmd.CommandText; Parameters = [] }
+            logCompiled ()
             cmd, ExecOutputClause outputFields
 
         | _ ->
-            this.Logger { Sql = cmd.CommandText; Parameters = [] }
+            logCompiled ()
             cmd, ExecNonQuery
 
     member this.Insert<'T, 'InsertReturn> (iq: InsertQuery<'T, 'InsertReturn>) =

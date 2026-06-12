@@ -2,10 +2,11 @@
 [<AutoOpen>]
 module SqlHydra.Query.DeleteBuilders
 
+open System
 open System.Threading
 
 let private prepareDeleteQuery<'Deleted> (ir: SelectQueryIR) =
-    DeleteQuery<'Deleted>({ Table = ir.From |> Option.defaultValue ""; Where = ir.Where })
+    DeleteQuery<'Deleted>({ Table = ir.From |> Option.defaultValue ""; Where = ir.Where; CommandOptions = ir.CommandOptions; })
 
 /// The base delete builder that contains all common operations
 type DeleteBuilder<'Deleted>() =
@@ -48,6 +49,15 @@ type DeleteBuilder<'Deleted>() =
     member this.Cancel (state: QuerySource<'T, SelectQueryIR>, cancellationToken: CancellationToken) =
         this.CancellationToken <- cancellationToken
         state
+
+    /// Sets the command execution timeout for this query.
+    /// Sub-second positive values are rounded up to one second. 
+    /// Passing `TimeSpan.Zero` is interpreted as "wait indefinitely".
+    /// Omitting `timeout` leaves the provider's default in place.
+    [<CustomOperation("timeout", MaintainsVariableSpace = true)>]
+    member this.Timeout (state: QuerySource<'T, SelectQueryIR>, timeout: TimeSpan) =
+        let query = state |> getQueryOrDefault
+        QuerySource<'T, SelectQueryIR>({ query with CommandOptions = { query.CommandOptions with CommandTimeout = Some timeout } }, state.TableMappings)
 
     /// Unwraps the query
     member this.Run (state: QuerySource<'Deleted>) =
