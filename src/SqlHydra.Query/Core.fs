@@ -271,7 +271,13 @@ type DeleteQuery<'T>(ir: DeleteQueryIR) =
     override this.CompileWith(emitter) = emitter.EmitDelete(ir)
 
 type UpdateQuery<'T, 'UpdateReturn>(spec: UpdateQuerySpec<'T, 'UpdateReturn>) =
+    let ir = lazy QueryUtils.fromUpdate spec
     member this.Spec = spec
+    /// Returns the underlying UpdateQueryIR. Raises for invalid specs (e.g. missing entity/set, or both combined).
+    member this.IR = ir.Value
 
 type InsertQuery<'T, 'Identity>(spec: InsertQuerySpec<'T, 'Identity>) =
+    let ir = lazy QueryUtils.fromInsert spec
     member this.Spec = spec
+    /// Returns the underlying InsertQueryIR. Raises for invalid specs (e.g. no entities, or getId with multiple rows).
+    member this.IR = ir.Value

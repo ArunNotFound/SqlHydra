@@ -19,7 +19,7 @@ let server = "localhost,12019"
 let connectionString = $@"Server={server};Database=AdventureWorks;User=sa;Password=Password#123;Connect Timeout=3;TrustServerCertificate=True"
 let db = QueryContextFactory.Create(connectionString, printf "SQL: %O")
 
-let private emitter = SqlHydra.Query.SqlServerEmitter() :> SqlHydra.Query.ISqlEmitter
+let emitter = SqlHydra.Query.SqlServerEmitter() :> SqlHydra.Query.ISqlEmitter
 
 let toSql (query: SqlHydra.Query.SelectQuery) =
     let sql = (query.CompileWith(emitter)).Sql
