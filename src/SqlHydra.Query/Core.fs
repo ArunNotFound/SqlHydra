@@ -272,6 +272,10 @@ type DeleteQuery<'T>(ir: DeleteQueryIR) =
 
 type UpdateQuery<'T, 'UpdateReturn>(spec: UpdateQuerySpec<'T, 'UpdateReturn>) =
     member this.Spec = spec
+    /// Returns the underlying UpdateQueryIR. Recomputes on each call; raises for invalid specs (e.g. missing entity/set, or both combined).
+    member this.IR = QueryUtils.fromUpdate spec
 
 type InsertQuery<'T, 'Identity>(spec: InsertQuerySpec<'T, 'Identity>) =
     member this.Spec = spec
+    /// Returns the underlying InsertQueryIR. Recomputes on each call; raises for invalid specs (e.g. no entities, or getId with multiple rows).
+    member this.IR = QueryUtils.fromInsert spec

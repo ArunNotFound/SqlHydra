@@ -712,7 +712,37 @@ let ``Insert Query with Identity``() =
         }
         |> toInsertSql
 
-    sql =! "INSERT INTO [Sales].[Customer] ([PersonID], [StoreID], [TerritoryID], [AccountNumber], [rowguid], [ModifiedDate]) VALUES (@p0, @p1, @p2, @p3, @p4, @p5);SELECT scope_identity() as Id" 
+    sql =! "INSERT INTO [Sales].[Customer] ([PersonID], [StoreID], [TerritoryID], [AccountNumber], [rowguid], [ModifiedDate]) VALUES (@p0, @p1, @p2, @p3, @p4, @p5);SELECT scope_identity() as Id"
+
+[<Test>]
+let ``Update Query IR property returns correct SQL``() =
+    let query =
+        update {
+            for c in Sales.Customer do
+            set c.AccountNumber "123"
+            where (c.AccountNumber = "000")
+        }
+    let sql = (emitter.EmitUpdate(query.IR)).Sql
+    sql =! "UPDATE [Sales].[Customer] SET [AccountNumber] = @p0 WHERE ([Sales].[Customer].[AccountNumber] = @p1)"
+
+[<Test>]
+let ``Insert Query IR property returns correct SQL``() =
+    let query =
+        insert {
+            for c in Sales.Customer do
+            entity
+                {
+                    Sales.Customer.AccountNumber = "123"
+                    Sales.Customer.rowguid = System.Guid.NewGuid()
+                    Sales.Customer.ModifiedDate = System.DateTime.Now
+                    Sales.Customer.PersonID = None
+                    Sales.Customer.StoreID = None
+                    Sales.Customer.TerritoryID = None
+                    Sales.Customer.CustomerID = 0
+                }
+        }
+    let sql = (emitter.EmitInsert(query.IR)).Sql
+    sql =! "INSERT INTO [Sales].[Customer] ([CustomerID], [PersonID], [StoreID], [TerritoryID], [AccountNumber], [rowguid], [ModifiedDate]) VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6)"
 
 [<Test>]
 let ``Inline Aggregates``() = 
