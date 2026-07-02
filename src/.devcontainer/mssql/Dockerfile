@@ -1,5 +1,5 @@
 #https://hub.docker.com/_/microsoft-mssql-server
-FROM mcr.microsoft.com/mssql/server:2019-latest
+FROM mcr.microsoft.com/mssql/server:2022-latest
 
 USER root
 

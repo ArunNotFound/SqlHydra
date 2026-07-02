@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  mssql:
+    build: 
+      context: ./src/.devcontainer/mssql
+      dockerfile: Dockerfile
+    ports:
+      - "12019:1433"
+    environment:
+      - ACCEPT_EULA=Y
+      - MSSQL_SA_PASSWORD=Password#123
+
+  postgres:
+    build: 
+      context: ./src/.devcontainer/postgresql
+      dockerfile: Dockerfile
+    ports:
+      - "54320:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+
+  oracle:
+    image: gvenzl/oracle-xe:21-slim-faststart
+    ports:
+      - "1521:1521"
+    environment:
+      - ORACLE_PASSWORD=Oracle1
+      - APP_USER=OT
+      - APP_USER_PASSWORD=Oracle1
+    volumes:
+      - ./src/.devcontainer/orcl/init-ot-schema.sql:/container-entrypoint-initdb.d/01_init_schema.sql
+      - ./src/.devcontainer/orcl/init-ot-data.sql:/container-entrypoint-initdb.d/02_init_data.sql
+
+  mysql:
+    build: 
+      context: ./docker/mysql
+    ports:
+      - "33060:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=mysql
+      - MYSQL_DATABASE=Adventureworks
