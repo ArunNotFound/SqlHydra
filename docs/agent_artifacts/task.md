@@ -1,0 +1,8 @@
+- `[x]` Update `Tests.fsproj` to only target `net10.0`
+- `[x]` Delete `.net8` and `.net9` `.fs` and batch files from `src/Tests/`
+- `[x]` Update `SqlHydra.Cli.fsproj` to `net10.0`
+- `[x]` Update `SqlHydra.Query.fsproj` to `netstandard2.0;net10.0`
+- `[x]` Update batch files in `src/SampleApp/`
+- `[x]` Update `src/Build/Program.fs` build script
+- `[x]` Update `.github/workflows/build-and-test.yml`
+- `[x]` Commit and push changes (Pending)
