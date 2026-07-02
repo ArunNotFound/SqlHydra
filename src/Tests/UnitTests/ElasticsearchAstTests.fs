@@ -69,3 +69,24 @@ let ``Multi-Match Fuzzy Search Translation`` () =
         }
     let expected = """{"query": {"bool": {"must": [{"multi_match": {"query": "inception", "fields": ["title","description"], "fuzziness": "AUTO"}}]}}}"""
     test <@ json = expected @>
+
+[<Test>]
+let ``Aggregation Date Histogram Translation`` () =
+    let json =
+        esquery {
+            agg "sales_over_time" (DateHistogramAgg("date", "month"))
+        }
+    let expected = """{"query": {"match_all": {}}, "aggs": {"sales_over_time": {"date_histogram": {"field": "date", "calendar_interval": "month"}}}}"""
+    test <@ json = expected @>
+
+[<Test>]
+let ``Sort and Search After Pagination Translation`` () =
+    let json =
+        esquery {
+            where (RTerm("category", "electronics"))
+            sortBy "price"
+            searchAfter [| box 150.0; box "id_789" |]
+        }
+    let expected = """{"query": {"bool": {"must": [{"term": {"category": "electronics"}}]}}, "sort": [{"price": "asc"}], "search_after": [150,"id_789"]}"""
+    test <@ json = expected @>
+

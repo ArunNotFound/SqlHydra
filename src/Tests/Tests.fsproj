@@ -56,6 +56,7 @@
     <Compile Include="UnitTests\SchemaTemplateTests.fs" />
     <Compile Include="UnitTests\ElasticsearchAstTests.fs" />
     <Compile Include="UnitTests\ElasticsearchIndexTests.fs" />
+    <Compile Include="UnitTests\ElasticsearchDeserializationTests.fs" />
     <Compile Include="DuckDb\AdventureWorksNet10.fs" />
     <Compile Include="DuckDb\DB.fs" />
     <Compile Include="DuckDb\QueryUnitTests.fs" />
