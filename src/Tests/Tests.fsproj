@@ -54,6 +54,7 @@
     <Compile Include="UnitTests\ColumnFilters.fs" />
     <Compile Include="UnitTests\TableFilters.fs" />
     <Compile Include="UnitTests\SchemaTemplateTests.fs" />
+    <Compile Include="UnitTests\ElasticsearchAstTests.fs" />
     <Compile Include="DuckDb\AdventureWorksNet10.fs" />
     <Compile Include="DuckDb\DB.fs" />
     <Compile Include="DuckDb\QueryUnitTests.fs" />
@@ -79,6 +80,7 @@
   <ItemGroup>
     <ProjectReference Include="..\SqlHydra.Query\SqlHydra.Query.fsproj" />
     <ProjectReference Include="..\SqlHydra.Cli\SqlHydra.Cli.fsproj" />
+    <ProjectReference Include="..\SqlHydra.Elasticsearch\SqlHydra.Elasticsearch.fsproj" />
   </ItemGroup>
   <ItemGroup>
     <Folder Include="Oracle\Verify\" />

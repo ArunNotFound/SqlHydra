@@ -7,6 +7,7 @@
 
   <ItemGroup>
     <Compile Include="ElasticsearchDataTypes.fs" />
+    <Compile Include="NativeAst.fs" />
     <Compile Include="ElasticsearchSchemaProvider.fs" />
     <Compile Include="Provider.fs" />
   </ItemGroup>
