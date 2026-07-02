@@ -58,6 +58,7 @@
     <Compile Include="UnitTests\ElasticsearchIndexTests.fs" />
     <Compile Include="UnitTests\ElasticsearchDeserializationTests.fs" />
     <Compile Include="UnitTests\KafkaAstTests.fs" />
+    <Compile Include="UnitTests\EtlImpedanceMismatchTests.fs" />
     <Compile Include="DuckDb\AdventureWorksNet10.fs" />
     <Compile Include="DuckDb\DB.fs" />
     <Compile Include="DuckDb\QueryUnitTests.fs" />
