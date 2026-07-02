@@ -893,3 +893,14 @@ Multiple extensions compose in order -- each wraps the previous one. An extensio
 
 - [TOML Configuration Reference](https://github.com/JordanMarr/SqlHydra/wiki/TOML-Configuration)
 - [Using HydraReader with other libraries](https://github.com/JordanMarr/SqlHydra/wiki/DataReaders)
+
+---
+
+## Project Management & Issue Tracking
+
+SqlHydra utilizes GitHub Issues and Projects to coordinate planning and development. For those contributing or tracking development:
+
+- **Issues**: We use [GitHub Issues](https://docs.github.com/en/issues/tracking-your-work-with-issues/about-issues) to track ideas, feedback, tasks, and bugs. Issues are enriched with organization-level fields for structured metadata (e.g., priority, effort, target dates).
+- **Projects**: Our work is organized using [GitHub Projects](https://docs.github.com/en/issues/planning-and-tracking-with-projects/learning-about-projects/about-projects). Projects provide flexible views (Kanban, tables) and customizable charts via insights for tracking data.
+- **Iterations & Milestones**: Upcoming work is grouped into Iterations for short-term planning and [Milestones](https://docs.github.com/en/issues/using-labels-and-milestones-to-track-work/about-milestones) for tracking broad progress across issues and pull requests.
+- **Hierarchy & PRs**: For complex tasks, we leverage parent and sub-issue progress tracking. Pull request fields are used to directly tie reviewer status and PR states into our project boards.
