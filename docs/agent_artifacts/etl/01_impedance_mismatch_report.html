@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ETL Impedance Mismatch Summary</title>
+    <style>
+        :root {
+            --bg-color: #0d1117;
+            --text-color: #c9d1d9;
+            --header-bg: #161b22;
+            --accent-color: #58a6ff;
+            --border-color: #30363d;
+            --card-bg: #21262d;
+            --success-color: #2ea043;
+            --warning-color: #d29922;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            line-height: 1.6;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+        header {
+            background-color: var(--header-bg);
+            border-bottom: 1px solid var(--border-color);
+            padding: 20px 0;
+            text-align: center;
+        }
+        h1 {
+            color: var(--accent-color);
+            margin: 0;
+        }
+        h2 {
+            color: #fff;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 10px;
+            margin-top: 40px;
+        }
+        .card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .pipeline-stage {
+            display: flex;
+            align-items: center;
+            margin: 20px 0;
+            background-color: var(--card-bg);
+            border-radius: 6px;
+            padding: 15px;
+            border-left: 4px solid var(--accent-color);
+        }
+        .pipeline-icon {
+            font-size: 24px;
+            margin-right: 15px;
+            min-width: 40px;
+            text-align: center;
+        }
+        .strategy-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        .strategy-card {
+            background-color: var(--header-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 15px;
+        }
+        .strategy-title {
+            color: var(--accent-color);
+            font-weight: bold;
+            font-size: 1.1em;
+            margin-bottom: 10px;
+        }
+        code {
+            background-color: rgba(110, 118, 129, 0.4);
+            padding: 2px 5px;
+            border-radius: 4px;
+            font-family: 'Courier New', Courier, monospace;
+        }
+        .highlight {
+            color: var(--warning-color);
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>End-to-End ETL Architectural Report</h1>
+        <p>Bridging the Relational-to-Hierarchical Impedance Mismatch in SqlHydra</p>
+    </header>
+
+    <div class="container">
+        <div class="card">
+            <h2>The Challenge: Impedance Mismatch</h2>
+            <p>Moving data from an upstream <strong>Relational Database (Oracle)</strong> to a downstream <strong>Document/Search Engine (Elasticsearch)</strong> introduces a massive structural conflict. Oracle thrives on strict normal forms (1NF, 2NF, 3NF) requiring multiple tables and foreign keys. Elasticsearch penalizes JOIN operations heavily, preferring highly denormalized, nested JSON documents.</p>
+            <p>Our ETL architecture solves this by leveraging <code>FSharp.Data</code> for loss-less type extraction and <code>DuckDB</code> as an analytical transformation engine.</p>
+        </div>
+
+        <h2>The Pipeline Architecture</h2>
+        
+        <div class="pipeline-stage">
+            <div class="pipeline-icon">📦</div>
+            <div>
+                <strong>1. Upstream Extraction (Oracle)</strong><br>
+                Raw, highly normalized relational data is queried from Oracle and safely extracted into TSV format.
+            </div>
+        </div>
+        
+        <div class="pipeline-stage">
+            <div class="pipeline-icon">🛡️</div>
+            <div>
+                <strong>2. Type-Safe Staging (FSharp.Data)</strong><br>
+                The TSV is ingested via <code>FSharp.Data.CsvProvider</code>. This guarantees that numbers, decimals, and datetimes are not silently corrupted into strings during transit.
+            </div>
+        </div>
+
+        <div class="pipeline-stage">
+            <div class="pipeline-icon">🦆</div>
+            <div>
+                <strong>3. Transformation (DuckDB + Parquet)</strong><br>
+                Data is flushed into highly compressed Parquet files. DuckDB is then booted up to perform the heavy lifting of the ETL: aggregating multiple relational rows (e.g., Order + OrderLines) into hierarchical JSON arrays via high-performance analytical SQL.
+            </div>
+        </div>
+
+        <div class="pipeline-stage">
+            <div class="pipeline-icon">🔍</div>
+            <div>
+                <strong>4. Downstream Ingestion (Elasticsearch)</strong><br>
+                The transformed, hierarchical JSON is indexed into Elasticsearch using the Bulk API, ready for lightning-fast search.
+            </div>
+        </div>
+
+        <h2>Elasticsearch Data Modeling Litmus Test</h2>
+        <p>To prove our <code>SqlHydra.Elasticsearch</code> AST (<code>esquery</code>) can handle any structural paradigm, we tested three distinct ES mapping strategies against our ETL payload:</p>
+
+        <div class="strategy-grid">
+            <div class="strategy-card">
+                <div class="strategy-title">Strategy A: Flattened</div>
+                <p><strong>Model:</strong> A single, wide table. Denormalizes Order and OrderLines entirely.</p>
+                <p><strong>Pros:</strong> Extremely fast to query. Trivial to ETL.</p>
+                <p><strong>Cons:</strong> Heavy data duplication (Order details repeated per line).</p>
+                <p><strong>AST Support:</strong> Standard <code>RMatch</code> and <code>RTerm</code>.</p>
+            </div>
+            
+            <div class="strategy-card">
+                <div class="strategy-title">Strategy B: Nested Array</div>
+                <p><strong>Model:</strong> An Order document containing a JSON Array of OrderLine objects (<code>nested</code> type).</p>
+                <p><strong>Pros:</strong> Perfect balance. Keeps data grouped hierarchically and enables complex cross-field querying.</p>
+                <p><strong>Cons:</strong> Expensive to update a single line without reindexing the parent.</p>
+                <p><strong>AST Support:</strong> Verified using the <code>nested "Path" (Query)</code> operation.</p>
+            </div>
+
+            <div class="strategy-card">
+                <div class="strategy-title">Strategy C: Parent/Child Join</div>
+                <p><strong>Model:</strong> Independent Order and OrderLine documents joined by a routing <code>join</code> datatype.</p>
+                <p><strong>Pros:</strong> Closest to the Oracle relational model. Allows updating child lines independently.</p>
+                <p><strong>Cons:</strong> High memory overhead; queries are significantly slower.</p>
+                <p><strong>AST Support:</strong> Verified using the <code>hasChild "type" (Query)</code> operation.</p>
+            </div>
+        </div>
+
+        <div class="card" style="margin-top: 40px; border-left: 4px solid var(--success-color);">
+            <h2>Conclusion</h2>
+            <p>The Litmus Test was a complete success. The tests verified that our F# to Elasticsearch compiler (<code>esquery { }</code>) can fluidly target any of the 3 modeling strategies. DuckDB proved to be the perfect bridge engine to absorb the relational complexity and output structured JSON ready for NoSQL ingestion.</p>
+        </div>
+    </div>
+</body>
+</html>
