@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SWOT Analysis: Kafka in SqlHydra</title>
+    <style>
+        :root {
+            --bg: #141414;
+            --surface: #242424;
+            --border: #3A3A3A;
+            --strength: #00E676; /* Vibrant Green */
+            --weakness: #FF1744; /* Vivid Red */
+            --opportunity: #2979FF; /* Vivid Blue */
+            --threat: #FF9100; /* Vivid Orange */
+            --text: #F5F5F5;
+        }
+        body {
+            font-family: 'Space Grotesk', system-ui, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 50px;
+            display: flex;
+            justify-content: center;
+        }
+        .container {
+            max-width: 1200px;
+            width: 100%;
+        }
+        h1 {
+            text-align: center;
+            font-size: 3rem;
+            margin-bottom: 50px;
+            letter-spacing: 1px;
+            text-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            text-transform: uppercase;
+        }
+        .swot-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 40px;
+        }
+        .swot-card {
+            background: var(--surface);
+            border-radius: 12px;
+            padding: 40px;
+            position: relative;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .swot-card:hover {
+            transform: translateY(-8px);
+        }
+        .swot-card::before {
+            content: '';
+            position: absolute;
+            left: -2px; top: -2px; right: -2px; bottom: -2px;
+            border-radius: 14px;
+            z-index: -1;
+            opacity: 0.5;
+            transition: opacity 0.3s;
+        }
+        .swot-card:hover::before { opacity: 1; }
+        
+        .strength::before { background: linear-gradient(135deg, transparent, var(--strength)); }
+        .weakness::before { background: linear-gradient(135deg, transparent, var(--weakness)); }
+        .opportunity::before { background: linear-gradient(135deg, transparent, var(--opportunity)); }
+        .threat::before { background: linear-gradient(135deg, transparent, var(--threat)); }
+        
+        .swot-card h2 {
+            font-size: 2.2rem;
+            margin-top: 0;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+        .strength h2 { color: var(--strength); }
+        .weakness h2 { color: var(--weakness); }
+        .opportunity h2 { color: var(--opportunity); }
+        .threat h2 { color: var(--threat); }
+
+        ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        li {
+            margin-bottom: 20px;
+            font-size: 1.15rem;
+            line-height: 1.6;
+            padding-left: 35px;
+            position: relative;
+            color: #E0E0E0;
+        }
+        li::before {
+            content: '◆';
+            position: absolute;
+            left: 0;
+            color: var(--border);
+        }
+        .strength li::before { color: var(--strength); }
+        .weakness li::before { color: var(--weakness); }
+        .opportunity li::before { color: var(--opportunity); }
+        .threat li::before { color: var(--threat); }
+
+        @media (max-width: 768px) {
+            .swot-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>SWOT Analysis: Kafka Integration</h1>
+
+        <div class="swot-grid">
+            
+            <div class="swot-card strength">
+                <h2>Strengths</h2>
+                <ul>
+                    <li><strong>Type-Safe Streaming:</strong> Parsing the Confluent Schema Registry guarantees 100% typed producers and consumers, a major pain point in F# microservices.</li>
+                    <li><strong>ksqlDB Synergy:</strong> SqlHydra already outputs SQL. Translating F# CE queries to ksqlDB `SELECT` streams is extremely straightforward.</li>
+                </ul>
+            </div>
+
+            <div class="swot-card weakness">
+                <h2>Weaknesses</h2>
+                <ul>
+                    <li><strong>Paradigm Mismatch:</strong> Relational queries expect finite lists. Streams expect `IAsyncEnumerable`. This requires a heavy refactor of the `SqlHydra.Query` execution engine.</li>
+                    <li><strong>State Management:</strong> Kafka stream processing (joins, windows) requires maintaining state, which goes against SqlHydra's stateless query translation model.</li>
+                </ul>
+            </div>
+
+            <div class="swot-card opportunity">
+                <h2>Opportunities</h2>
+                <ul>
+                    <li><strong>Full Stack Data Toolkit:</strong> Moving from just relational databases to becoming the definitive F# library for <em>all</em> data operations (RDBMS, NoSQL via ES, Streaming via Kafka).</li>
+                    <li><strong>CDC Integration:</strong> Automatic mapping of Debezium SQL CDC events directly into typed F# records.</li>
+                </ul>
+            </div>
+
+            <div class="swot-card threat">
+                <h2>Threats</h2>
+                <ul>
+                    <li><strong>Scope Creep:</strong> Trying to replicate the entire `Confluent.Kafka` client or `ksqlDB` client might bloat SqlHydra beyond its core mission.</li>
+                    <li><strong>Maintenance Burden:</strong> Maintaining Avro, Protobuf, and JSON Schema parsers alongside SQL dialects is a massive undertaking for a single tool.</li>
+                </ul>
+            </div>
+
+        </div>
+    </div>
+</body>
+</html>

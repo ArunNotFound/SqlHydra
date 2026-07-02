@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deep Thinking: Elasticsearch Integration</title>
+    <style>
+        :root {
+            --bg: #0B0E14;
+            --surface: rgba(255, 255, 255, 0.03);
+            --surface-hover: rgba(255, 255, 255, 0.08);
+            --border: rgba(255, 255, 255, 0.1);
+            --primary: #00F0FF;
+            --secondary: #8A2BE2;
+            --text: #E2E8F0;
+            --text-muted: #94A3B8;
+        }
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            background: linear-gradient(135deg, #05070a 0%, var(--bg) 100%);
+            color: var(--text);
+            margin: 0;
+            padding: 40px;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+        }
+        .container {
+            max-width: 1000px;
+            width: 100%;
+        }
+        header {
+            text-align: center;
+            margin-bottom: 50px;
+        }
+        h1 {
+            font-size: 3rem;
+            margin: 0;
+            background: linear-gradient(to right, var(--primary), var(--secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            animation: glow 2s ease-in-out infinite alternate;
+        }
+        @keyframes glow {
+            from { text-shadow: 0 0 10px rgba(0,240,255,0.2); }
+            to { text-shadow: 0 0 20px rgba(138,43,226,0.4); }
+        }
+        .subtitle {
+            color: var(--text-muted);
+            font-size: 1.2rem;
+            margin-top: 10px;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 30px;
+        }
+        .card {
+            background: var(--surface);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 30px;
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            cursor: default;
+            position: relative;
+            overflow: hidden;
+        }
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; height: 2px;
+            background: linear-gradient(90deg, transparent, var(--primary), transparent);
+            opacity: 0;
+            transition: opacity 0.4s;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            background: var(--surface-hover);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        }
+        .card:hover::before { opacity: 1; }
+        .card h2 {
+            color: var(--primary);
+            margin-top: 0;
+            font-size: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .card h2::before {
+            content: '>';
+            color: var(--secondary);
+            font-family: monospace;
+            font-weight: bold;
+        }
+        .card p { line-height: 1.7; color: var(--text-muted); }
+        
+        .timeline {
+            margin-top: 50px;
+            position: relative;
+            padding-left: 30px;
+            border-left: 2px solid var(--border);
+        }
+        .timeline-item {
+            position: relative;
+            margin-bottom: 30px;
+        }
+        .timeline-item::before {
+            content: '';
+            position: absolute;
+            left: -37px;
+            top: 5px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: var(--secondary);
+            box-shadow: 0 0 10px var(--secondary);
+        }
+        .timeline-content {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            padding: 20px;
+            border-radius: 12px;
+        }
+        .timeline-content h3 { margin-top: 0; color: var(--text); }
+        .interactive-btn {
+            background: transparent;
+            border: 1px solid var(--primary);
+            color: var(--primary);
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s;
+            margin-top: 15px;
+        }
+        .interactive-btn:hover {
+            background: var(--primary);
+            color: var(--bg);
+            box-shadow: 0 0 15px var(--primary);
+        }
+        .hidden-details {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.5s ease-out;
+            color: var(--text-muted);
+            margin-top: 10px;
+        }
+        .expanded { max-height: 200px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Deep Thinking: ES Architecture</h1>
+            <div class="subtitle">Architecting Elasticsearch 8/9 Integration for SqlHydra</div>
+        </header>
+
+        <div class="grid">
+            <div class="card">
+                <h2>The F# Quotation Challenge</h2>
+                <p>SqlHydra translates F# Quotations directly into SQL strings for relational databases. Elasticsearch is fundamentally a NoSQL document store operating on JSON Query DSL. Mapping strict relational logic (JOINs, complex aggregates) to ES requires a paradigm shift.</p>
+            </div>
+            
+            <div class="card">
+                <h2>ES SQL vs. ES|QL</h2>
+                <p>Elasticsearch 8+ introduces <strong>ES|QL</strong> (Elasticsearch Query Language) alongside the existing <strong>ES SQL API</strong>. ES SQL allows standard `SELECT` syntax, which aligns perfectly with SqlHydra's current generation. ES|QL uses piped commands (`from... | where... | keep...`).</p>
+            </div>
+
+            <div class="card">
+                <h2>The "Good Parts" Extrapolation</h2>
+                <p>SqlHydra's strong suit is type-safe query generation and schema extraction. We can leverage the `information_schema` (or `_mapping` API in ES) to generate F# records for ES indexes. Query contexts will then translate standard LINQ/CE directly into ES SQL REST calls.</p>
+            </div>
+        </div>
+
+        <div class="timeline">
+            <div class="timeline-item">
+                <div class="timeline-content">
+                    <h3>Phase 1: Schema Provider (Mappings -> F#)</h3>
+                    <p>Read the ES `_mapping` API to extract index fields. Translate ES types (text, keyword, integer, boolean) into F# primitives. Generate `ISqlHydraDbProvider` for ES.</p>
+                    <button class="interactive-btn" onclick="toggleDetails(this)">View Strategy</button>
+                    <div class="hidden-details">
+                        Use `Elastic.Clients.Elasticsearch` to pull index definitions. Map nested objects as complex records or JSON strings, maintaining SqlHydra's philosophy of strong typing.
+                    </div>
+                </div>
+            </div>
+            <div class="timeline-item">
+                <div class="timeline-content">
+                    <h3>Phase 2: Translation Engine (Quotations -> ES SQL)</h3>
+                    <p>Instead of building heavy JSON DSL, compile F# AST into standard SQL strings and POST them to the ES `_sql` endpoint.</p>
+                    <button class="interactive-btn" onclick="toggleDetails(this)">View Strategy</button>
+                    <div class="hidden-details">
+                        The `/_sql?format=json` endpoint accepts standard SQL. This allows us to reuse 80% of SqlHydra's existing SQL AST builder! We just need a dialect specific to ES SQL limitations.
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function toggleDetails(btn) {
+            const details = btn.nextElementSibling;
+            details.classList.toggle('expanded');
+            btn.textContent = details.classList.contains('expanded') ? 'Hide Strategy' : 'View Strategy';
+        }
+    </script>
+</body>
+</html>

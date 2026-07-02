@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deep Thinking: Kafka Integration</title>
+    <style>
+        :root {
+            --bg: #0a0a0a;
+            --surface: rgba(255, 255, 255, 0.04);
+            --surface-hover: rgba(255, 255, 255, 0.08);
+            --border: rgba(255, 255, 255, 0.1);
+            --primary: #FF3366;
+            --secondary: #00F0FF;
+            --text: #F3F4F6;
+            --text-muted: #9CA3AF;
+        }
+        body {
+            font-family: 'Space Grotesk', system-ui, sans-serif;
+            background: radial-gradient(circle at center, #111 0%, var(--bg) 100%);
+            color: var(--text);
+            margin: 0;
+            padding: 40px;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+        }
+        .container {
+            max-width: 1000px;
+            width: 100%;
+        }
+        header {
+            text-align: center;
+            margin-bottom: 50px;
+        }
+        h1 {
+            font-size: 3.5rem;
+            margin: 0;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+        .subtitle {
+            color: var(--text-muted);
+            font-size: 1.2rem;
+            margin-top: 10px;
+        }
+        .flow-container {
+            display: flex;
+            flex-direction: column;
+            gap: 30px;
+            margin-top: 40px;
+        }
+        .flow-step {
+            background: var(--surface);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 30px;
+            position: relative;
+            transition: all 0.3s ease;
+        }
+        .flow-step:hover {
+            transform: scale(1.02);
+            border-color: var(--primary);
+            box-shadow: 0 10px 40px rgba(255, 51, 102, 0.15);
+        }
+        .step-number {
+            position: absolute;
+            top: -20px;
+            left: -20px;
+            width: 50px;
+            height: 50px;
+            background: var(--bg);
+            border: 2px solid var(--primary);
+            color: var(--primary);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            font-weight: bold;
+            box-shadow: 0 0 15px rgba(255, 51, 102, 0.5);
+        }
+        .flow-step h2 {
+            margin-top: 0;
+            color: var(--secondary);
+            font-size: 1.8rem;
+        }
+        .flow-step p {
+            line-height: 1.7;
+            color: var(--text-muted);
+            font-size: 1.1rem;
+        }
+        .interactive-btn {
+            background: transparent;
+            border: 2px solid var(--primary);
+            color: var(--text);
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s;
+            margin-top: 15px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .interactive-btn:hover {
+            background: var(--primary);
+            color: var(--bg);
+            box-shadow: 0 0 20px var(--primary);
+        }
+        .details-panel {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.5s ease-out;
+            color: var(--secondary);
+            margin-top: 15px;
+            font-family: monospace;
+            font-size: 0.9rem;
+        }
+        .expanded { max-height: 250px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Kafka Paradigm Shift</h1>
+            <div class="subtitle">From Request/Response to Real-Time Streaming Data</div>
+        </header>
+
+        <div class="flow-container">
+            <div class="flow-step">
+                <div class="step-number">1</div>
+                <h2>The Fundamental Disconnect</h2>
+                <p>SqlHydra is fundamentally designed around the Request/Response paradigm (query database -> await result -> process). Apache Kafka is an unbounded, continuous event streaming platform. Bringing SqlHydra to Kafka requires a mental paradigm shift from static tables to dynamic, moving logs.</p>
+            </div>
+
+            <div class="flow-step">
+                <div class="step-number">2</div>
+                <h2>The Bridge: ksqlDB</h2>
+                <p>Kafka provides <strong>ksqlDB</strong>, a streaming SQL engine. This is our entry point! We can leverage SqlHydra's strong F# Quotation-to-SQL translation engine to generate `CREATE STREAM`, `CREATE TABLE`, and `SELECT EMIT CHANGES` ksqlDB commands.</p>
+                <button class="interactive-btn" onclick="togglePanel(this)">View ksqlDB Integration</button>
+                <div class="details-panel">
+                    F# AST -> "SELECT * FROM topic_stream WHERE price > 100 EMIT CHANGES;"<br><br>
+                    SqlHydra could provide an IAsyncEnumerable interface that indefinitely yields F# records as messages arrive on the topic!
+                </div>
+            </div>
+
+            <div class="flow-step">
+                <div class="step-number">3</div>
+                <h2>Schema Registry as a Database</h2>
+                <p>In standard SqlHydra, we read SQL metadata via `information_schema`. For Kafka, the "Database Schema" is the <strong>Confluent Schema Registry</strong> (Avro/Protobuf/JSON Schema). SqlHydra can ping the Schema Registry, parse Avro schemas, and instantly generate F# records representing the topic's data contract.</p>
+                <button class="interactive-btn" onclick="togglePanel(this)">View Schema Generation</button>
+                <div class="details-panel">
+                    GET /subjects/my-topic-value/versions/latest<br>
+                    Parse Avro AST -> Generate F# Type Providers or static .fs records.<br>
+                    Guarantee 100% type safety on Publish and Consume!
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function togglePanel(btn) {
+            const panel = btn.nextElementSibling;
+            panel.classList.toggle('expanded');
+            btn.textContent = panel.classList.contains('expanded') ? 'Hide Details' : btn.textContent.replace('Hide', 'View');
+        }
+    </script>
+</body>
+</html>

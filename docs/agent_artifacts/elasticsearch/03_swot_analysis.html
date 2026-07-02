@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SWOT Analysis: Elasticsearch in SqlHydra</title>
+    <style>
+        :root {
+            --bg: #0F172A;
+            --surface: #1E293B;
+            --border: #334155;
+            --strength: #10B981;
+            --weakness: #F43F5E;
+            --opportunity: #3B82F6;
+            --threat: #F59E0B;
+            --text: #F8FAFC;
+        }
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 50px;
+            display: flex;
+            justify-content: center;
+        }
+        .container {
+            max-width: 1200px;
+            width: 100%;
+        }
+        h1 {
+            text-align: center;
+            font-size: 3rem;
+            margin-bottom: 50px;
+            letter-spacing: -1px;
+            text-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        }
+        .swot-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 30px;
+        }
+        .swot-card {
+            background: var(--surface);
+            border-radius: 20px;
+            padding: 40px;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        .swot-card:hover {
+            transform: translateY(-5px) scale(1.02);
+            box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+            z-index: 10;
+        }
+        .swot-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 5px;
+        }
+        .strength::before { background: var(--strength); box-shadow: 0 0 20px var(--strength); }
+        .weakness::before { background: var(--weakness); box-shadow: 0 0 20px var(--weakness); }
+        .opportunity::before { background: var(--opportunity); box-shadow: 0 0 20px var(--opportunity); }
+        .threat::before { background: var(--threat); box-shadow: 0 0 20px var(--threat); }
+        
+        .swot-card h2 {
+            font-size: 2rem;
+            margin-top: 0;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .strength h2 { color: var(--strength); }
+        .weakness h2 { color: var(--weakness); }
+        .opportunity h2 { color: var(--opportunity); }
+        .threat h2 { color: var(--threat); }
+
+        ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        li {
+            margin-bottom: 15px;
+            font-size: 1.1rem;
+            line-height: 1.6;
+            padding-left: 30px;
+            position: relative;
+            color: #CBD5E1;
+        }
+        li::before {
+            content: '→';
+            position: absolute;
+            left: 0;
+            color: var(--text);
+            opacity: 0.5;
+        }
+        @media (max-width: 768px) {
+            .swot-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>SWOT Analysis: ES 8/9 Integration</h1>
+
+        <div class="swot-grid">
+            
+            <div class="swot-card strength">
+                <h2>Strengths</h2>
+                <ul>
+                    <li><strong>SQL Generation Reuse:</strong> By leveraging Elasticsearch SQL, we can reuse ~80% of SqlHydra's existing Query AST generation code.</li>
+                    <li><strong>Strong Typing:</strong> Developers get intellisense on Elasticsearch documents without writing JSON mapping classes manually.</li>
+                    <li><strong>Unified API:</strong> Query Elasticsearch just like you query Postgres or SQL Server using the exact same F# syntax.</li>
+                </ul>
+            </div>
+
+            <div class="swot-card weakness">
+                <h2>Weaknesses</h2>
+                <ul>
+                    <li><strong>Complex Nesting:</strong> SqlHydra maps to flat tables; ES heavily relies on nested arrays and objects which are hard to map to standard F# records without breaking SQL semantics.</li>
+                    <li><strong>Partial SQL Support:</strong> Elasticsearch SQL API does not support all SQL features (e.g., complex window functions, certain types of JOINs).</li>
+                </ul>
+            </div>
+
+            <div class="swot-card opportunity">
+                <h2>Opportunities</h2>
+                <ul>
+                    <li><strong>Pioneering F#:</strong> No other F# library currently provides a zero-boilerplate, type-provider-like experience for Elasticsearch 8 and 9 using native LINQ/SQL.</li>
+                    <li><strong>ES|QL Future:</strong> Once established, the generation could evolve from ES SQL to pure ES|QL for even greater performance.</li>
+                    <li><strong>Cross-Store Joins:</strong> Potentially combine data from RDBMS and Elasticsearch within the same F# codebase seamlessly.</li>
+                </ul>
+            </div>
+
+            <div class="swot-card threat">
+                <h2>Threats</h2>
+                <ul>
+                    <li><strong>API Instability:</strong> ES SQL and ES|QL are relatively new and subject to rapid iteration, potentially causing maintenance overhead.</li>
+                    <li><strong>Performance Overhead:</strong> ES SQL translates SQL to DSL internally, which adds a slight latency overhead compared to raw Query DSL POST requests.</li>
+                    <li><strong>Kafka Pivot:</strong> Committing heavily to ES right now might delay Kafka integration, which requires a completely different streaming paradigm.</li>
+                </ul>
+            </div>
+
+        </div>
+    </div>
+</body>
+</html>

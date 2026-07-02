@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Brainstorming: Kafka Ecosystem</title>
+    <style>
+        :root {
+            --bg: #121212;
+            --surface: #1E1E1E;
+            --border: #333333;
+            --primary: #F05032; /* Kafka Red/Orange */
+            --secondary: #FFB300;
+            --accent: #00F0FF;
+            --text: #E0E0E0;
+            --text-muted: #9E9E9E;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 40px;
+            display: flex;
+            justify-content: center;
+        }
+        .container {
+            max-width: 900px;
+            width: 100%;
+        }
+        h1 {
+            color: var(--text);
+            text-align: center;
+            font-size: 2.8rem;
+            margin-bottom: 40px;
+            border-bottom: 2px solid var(--border);
+            padding-bottom: 20px;
+        }
+        h1 span { color: var(--primary); }
+        .node-network {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 25px;
+        }
+        .node {
+            background: var(--surface);
+            border-left: 4px solid var(--primary);
+            border-radius: 8px;
+            padding: 25px;
+            position: relative;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        .node:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(240, 80, 50, 0.2);
+            border-color: var(--secondary);
+        }
+        .node-header {
+            margin-bottom: 15px;
+        }
+        .node-title {
+            font-size: 1.5rem;
+            color: var(--secondary);
+            margin: 0 0 10px 0;
+        }
+        .badge {
+            background: rgba(255, 179, 0, 0.1);
+            color: var(--secondary);
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: bold;
+            display: inline-block;
+            margin-bottom: 15px;
+        }
+        .node-body {
+            color: var(--text-muted);
+            line-height: 1.6;
+            font-size: 1rem;
+        }
+        .idea-highlight {
+            color: var(--accent);
+            font-style: italic;
+            margin-top: 15px;
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Brainstorming: <span>Kafka Ecosystem</span></h1>
+
+        <div class="node-network">
+            
+            <div class="node">
+                <div class="node-header">
+                    <h2 class="node-title">Confluent.Kafka & FsKafka</h2>
+                    <span class="badge">Ecosystem Wrappers</span>
+                </div>
+                <div class="node-body">
+                    <strong>Confluent.Kafka</strong> is the standard .NET client, wrapping `librdkafka`. <strong>FsKafka</strong> offers a more idiomatic F# wrapper.<br><br>
+                    Both are low-level producer/consumer APIs. SqlHydra's role wouldn't be to wrap these, but to <i>feed</i> them perfectly typed F# records generated from the remote Schema Registry.
+                    <span class="idea-highlight">Idea: SqlHydra.Kafka.Provider could auto-generate Consumer/Producer loops with strict typing.</span>
+                </div>
+            </div>
+
+            <div class="node">
+                <div class="node-header">
+                    <h2 class="node-title">ksqlDB Integration</h2>
+                    <span class="badge">Streaming SQL</span>
+                </div>
+                <div class="node-body">
+                    ksqlDB allows querying Kafka streams using SQL. Since SqlHydra generates SQL, we can construct push queries (`SELECT EMIT CHANGES`) that translate into continuous async streams in F# (`IAsyncEnumerable<'T>`).<br><br>
+                    <span class="idea-highlight">Idea: Instead of returning a List, SqlHydra translates `query { ... }` into an ongoing Task stream!</span>
+                </div>
+            </div>
+
+            <div class="node">
+                <div class="node-header">
+                    <h2 class="node-title">Event Sourcing / CDC</h2>
+                    <span class="badge">Data Pipeline (Debezium)</span>
+                </div>
+                <div class="node-body">
+                    If users use Debezium to stream Postgres/SQL Server changes into Kafka, SqlHydra already has the relational schema! We can generate strongly-typed "Change Data Capture" event structures.<br><br>
+                    <span class="idea-highlight">Idea: Map relational `Customer` table to a Kafka `Customer_CDC_Event` F# record seamlessly.</span>
+                </div>
+            </div>
+
+            <div class="node">
+                <div class="node-header">
+                    <h2 class="node-title">Schema Registry Generation</h2>
+                    <span class="badge">Avro / Protobuf</span>
+                </div>
+                <div class="node-body">
+                    SqlHydra accesses the Confluent Schema Registry API, downloads the Avro/Protobuf schema, and translates the JSON AST into F# records.<br><br>
+                    <span class="idea-highlight">Idea: Reuses our learnings from Symphony's Native JSON AST mapping!</span>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,15 @@
+INSTALL sqlite;
+LOAD sqlite;
+ATTACH 'src/Tests/TestData/AdventureWorksLT.db' AS sqlite_db (TYPE sqlite);
+CREATE TABLE ErrorLog AS SELECT * FROM sqlite_db.ErrorLog;
+CREATE TABLE BuildVersion AS SELECT * FROM sqlite_db.BuildVersion;
+CREATE TABLE Address AS SELECT * FROM sqlite_db.Address;
+CREATE TABLE Customer AS SELECT * FROM sqlite_db.Customer;
+CREATE TABLE CustomerAddress AS SELECT * FROM sqlite_db.CustomerAddress;
+CREATE TABLE Product AS SELECT * FROM sqlite_db.Product;
+CREATE TABLE ProductCategory AS SELECT * FROM sqlite_db.ProductCategory;
+CREATE TABLE ProductDescription AS SELECT * FROM sqlite_db.ProductDescription;
+CREATE TABLE ProductModel AS SELECT * FROM sqlite_db.ProductModel;
+CREATE TABLE ProductModelProductDescription AS SELECT * FROM sqlite_db.ProductModelProductDescription;
+CREATE TABLE SalesOrderDetail AS SELECT * FROM sqlite_db.SalesOrderDetail;
+CREATE TABLE SalesOrderHeader AS SELECT * FROM sqlite_db.SalesOrderHeader;
