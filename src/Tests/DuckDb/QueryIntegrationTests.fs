@@ -28,22 +28,22 @@ module dbo =
 
 let stubbedErrorLog = 
     {
-        main.ErrorLog.ErrorLogID = 0L // Exclude
-        main.ErrorLog.ErrorTime = System.DateTime.Now
-        main.ErrorLog.ErrorLine = None
-        main.ErrorLog.ErrorMessage = "TEST INSERT ASYNC"
-        main.ErrorLog.ErrorNumber = 400L
-        main.ErrorLog.ErrorProcedure = (Some "Procedure 400")
-        main.ErrorLog.ErrorSeverity = None
-        main.ErrorLog.ErrorState = None
-        main.ErrorLog.UserName = "jmarr"
+        sqlite_db.ErrorLog.ErrorLogID = 0L // Exclude
+        sqlite_db.ErrorLog.ErrorTime = System.DateTime.Now
+        sqlite_db.ErrorLog.ErrorLine = None
+        sqlite_db.ErrorLog.ErrorMessage = "TEST INSERT ASYNC"
+        sqlite_db.ErrorLog.ErrorNumber = 400L
+        sqlite_db.ErrorLog.ErrorProcedure = (Some "Procedure 400")
+        sqlite_db.ErrorLog.ErrorSeverity = None
+        sqlite_db.ErrorLog.ErrorState = None
+        sqlite_db.ErrorLog.UserName = "jmarr"
     }
 
-[<Test; Ignore("DuckDB integration tests require sqlite_scanner extension setup")>]
+[<Test>]
 let ``Where City Starts With S``() = task {
     let! addresses =
         selectTask db {
-            for a in main.Address do
+            for a in sqlite_db.Address do
             where (a.City |=| [ "Seattle"; "Santa Cruz" ])
         }
 
@@ -51,11 +51,11 @@ let ``Where City Starts With S``() = task {
     Assert.IsTrue(addresses |> Seq.forall (fun a -> a.City = "Seattle" || a.City = "Santa Cruz"), "Expected only 'Seattle' or 'Santa Cruz'.")
 }
 
-[<Test; Ignore("DuckDB integration tests require sqlite_scanner extension setup")>]
+[<Test>]
 let ``Select City Column Where City Starts with S``() = task {
     let! cities =
         selectTask db {
-            for a in main.Address do
+            for a in sqlite_db.Address do
             where (a.City =% "S%")
             select a.City
         }
@@ -64,12 +64,12 @@ let ``Select City Column Where City Starts with S``() = task {
     Assert.IsTrue(cities |> Seq.forall (fun city -> city.StartsWith "S"), "Expected all cities to start with 'S'.")
 }
 
-[<Test; Ignore("DuckDB integration tests require sqlite_scanner extension setup")>]
+[<Test>]
 let ``Inner Join Orders-Details``() = task {
     let! results =
         selectTask db {
-            for o in main.SalesOrderHeader do
-            join d in main.SalesOrderDetail on (o.SalesOrderID = d.SalesOrderID)
+            for o in sqlite_db.SalesOrderHeader do
+            join d in sqlite_db.SalesOrderDetail on (o.SalesOrderID = d.SalesOrderID)
             where (o.OnlineOrderFlag = 0L)
             select (o, d)
         }
@@ -77,17 +77,17 @@ let ``Inner Join Orders-Details``() = task {
     gt0 results
 }
 
-[<Test; Ignore("DuckDB integration tests require sqlite_scanner extension setup")>]
+[<Test>]
 let ``Where subqueryOne``() = task {
     let avgListPrice =
         select {
-            for p in main.Product do
+            for p in sqlite_db.Product do
             select (avgBy p.ListPrice)
         }
 
     let! productsWithAboveAveragePrice =
         selectTask db {
-            for p in main.Product do
+            for p in sqlite_db.Product do
             where (p.ListPrice > subqueryOne avgListPrice)
             select (p.Name, p.ListPrice)
         }
@@ -95,12 +95,12 @@ let ``Where subqueryOne``() = task {
     gt0 productsWithAboveAveragePrice
 }
 
-[<Test; Ignore("DuckDB integration tests require sqlite_scanner extension setup")>]
+[<Test>]
 let ``Select with Timeout``() = task {
     use! ctx = db.OpenContextAsync()
     let q =
         select {
-            for c in main.Customer do
+            for c in sqlite_db.Customer do
             where (c.CustomerID = 1L)
             timeout (System.TimeSpan.FromSeconds 45.0)
         }
@@ -108,7 +108,7 @@ let ``Select with Timeout``() = task {
     cmd.CommandTimeout =! 45
 }
 
-[<Test; Ignore("DuckDB integration tests require sqlite_scanner extension setup")>]
+[<Test>]
 let ``Select without Timeout Leaves DbCommand Default``() = task {
     use! ctx = db.OpenContextAsync()
     // Capture the provider default by building a no-options command.
@@ -118,19 +118,19 @@ let ``Select without Timeout Leaves DbCommand Default``() = task {
 
     let q =
         select {
-            for c in main.Customer do
+            for c in sqlite_db.Customer do
             where (c.CustomerID = 1L)
         }
     use cmd = ctx.BuildCommand(q.IR)
     cmd.CommandTimeout =! defaultTimeout
 }
 
-[<Test; Ignore("DuckDB integration tests require sqlite_scanner extension setup")>]
+[<Test>]
 let ``Select with Multiple Timeouts``() = task {
     use! ctx = db.OpenContextAsync()
     let q =
         select {
-            for c in main.Customer do
+            for c in sqlite_db.Customer do
             where (c.CustomerID = 1L)
             timeout (System.TimeSpan.FromSeconds 5.0)
             timeout (System.TimeSpan.FromSeconds 60.0)
@@ -139,12 +139,12 @@ let ``Select with Multiple Timeouts``() = task {
     cmd.CommandTimeout =! 60
 }
 
-[<Test; Ignore("DuckDB integration tests require sqlite_scanner extension setup")>]
+[<Test>]
 let ``Select with Sub-Second Timeout``() = task {
     use! ctx = db.OpenContextAsync()
     let q =
         select {
-            for c in main.Customer do
+            for c in sqlite_db.Customer do
             where (c.CustomerID = 1L)
             timeout (System.TimeSpan.FromMilliseconds 500.0)
         }
@@ -155,12 +155,12 @@ let ``Select with Sub-Second Timeout``() = task {
     cmd.CommandTimeout =! 1
 }
 
-[<Test; Ignore("DuckDB integration tests require sqlite_scanner extension setup")>]
+[<Test>]
 let ``Select with Zero Timeout``() = task {
     use! ctx = db.OpenContextAsync()
     let q =
         select {
-            for c in main.Customer do
+            for c in sqlite_db.Customer do
             where (c.CustomerID = 1L)
             timeout System.TimeSpan.Zero
         }
@@ -168,24 +168,24 @@ let ``Select with Zero Timeout``() = task {
     cmd.CommandTimeout =! 0
 }
 
-[<Test; Ignore("DuckDB integration tests require sqlite_scanner extension setup")>]
+[<Test>]
 let ``InsertGetId Test``() = task {
     let errorLog = 
         {
-            main.ErrorLog.ErrorLogID = 0L // Exclude
-            main.ErrorLog.ErrorTime = System.DateTime.Now
-            main.ErrorLog.ErrorLine = None
-            main.ErrorLog.ErrorMessage = "TEST"
-            main.ErrorLog.ErrorNumber = 400L
-            main.ErrorLog.ErrorProcedure = (Some "Procedure 400")
-            main.ErrorLog.ErrorSeverity = None
-            main.ErrorLog.ErrorState = None
-            main.ErrorLog.UserName = "jmarr"
+            sqlite_db.ErrorLog.ErrorLogID = 0L // Exclude
+            sqlite_db.ErrorLog.ErrorTime = System.DateTime.Now
+            sqlite_db.ErrorLog.ErrorLine = None
+            sqlite_db.ErrorLog.ErrorMessage = "TEST"
+            sqlite_db.ErrorLog.ErrorNumber = 400L
+            sqlite_db.ErrorLog.ErrorProcedure = (Some "Procedure 400")
+            sqlite_db.ErrorLog.ErrorSeverity = None
+            sqlite_db.ErrorLog.ErrorState = None
+            sqlite_db.ErrorLog.UserName = "jmarr"
         }
 
     let! errorLogId = 
         insertTask db {
-            for e in main.ErrorLog do
+            for e in sqlite_db.ErrorLog do
             entity errorLog
             getId e.ErrorLogID
         }
@@ -193,24 +193,24 @@ let ``InsertGetId Test``() = task {
     Assert.IsTrue(errorLogId > 0L, "Expected returned ID to be > 0")
 }
 
-[<Test; Ignore("DuckDB integration tests require sqlite_scanner extension setup")>]
+[<Test>]
 let ``InsertGetIdAsync Test``() = task {
     let errorLog = 
         {
-            main.ErrorLog.ErrorLogID = 0L // Exclude
-            main.ErrorLog.ErrorTime = System.DateTime.Now
-            main.ErrorLog.ErrorLine = None
-            main.ErrorLog.ErrorMessage = "TEST INSERT ASYNC"
-            main.ErrorLog.ErrorNumber = 400L
-            main.ErrorLog.ErrorProcedure = (Some "Procedure 400")
-            main.ErrorLog.ErrorSeverity = None
-            main.ErrorLog.ErrorState = None
-            main.ErrorLog.UserName = "jmarr"
+            sqlite_db.ErrorLog.ErrorLogID = 0L // Exclude
+            sqlite_db.ErrorLog.ErrorTime = System.DateTime.Now
+            sqlite_db.ErrorLog.ErrorLine = None
+            sqlite_db.ErrorLog.ErrorMessage = "TEST INSERT ASYNC"
+            sqlite_db.ErrorLog.ErrorNumber = 400L
+            sqlite_db.ErrorLog.ErrorProcedure = (Some "Procedure 400")
+            sqlite_db.ErrorLog.ErrorSeverity = None
+            sqlite_db.ErrorLog.ErrorState = None
+            sqlite_db.ErrorLog.UserName = "jmarr"
         }
 
     let! result = 
         insertTask db {
-            for e in main.ErrorLog do
+            for e in sqlite_db.ErrorLog do
             entity errorLog
             getId e.ErrorLogID
         }
@@ -218,22 +218,22 @@ let ``InsertGetIdAsync Test``() = task {
     result >! 0L
 }
 
-[<Test; Ignore("DuckDB integration tests require sqlite_scanner extension setup")>]
+[<Test>]
 let ``Insert with Timeout``() = task {
     use! ctx = db.OpenContextAsync()
     let sample =
-        { main.ErrorLog.ErrorLogID = 0L
-          main.ErrorLog.ErrorTime = System.DateTime.Now
-          main.ErrorLog.ErrorLine = None
-          main.ErrorLog.ErrorMessage = "TIMEOUT TEST"
-          main.ErrorLog.ErrorNumber = 400L
-          main.ErrorLog.ErrorProcedure = Some "Procedure 400"
-          main.ErrorLog.ErrorSeverity = None
-          main.ErrorLog.ErrorState = None
-          main.ErrorLog.UserName = "jmarr" }
+        { sqlite_db.ErrorLog.ErrorLogID = 0L
+          sqlite_db.ErrorLog.ErrorTime = System.DateTime.Now
+          sqlite_db.ErrorLog.ErrorLine = None
+          sqlite_db.ErrorLog.ErrorMessage = "TIMEOUT TEST"
+          sqlite_db.ErrorLog.ErrorNumber = 400L
+          sqlite_db.ErrorLog.ErrorProcedure = Some "Procedure 400"
+          sqlite_db.ErrorLog.ErrorSeverity = None
+          sqlite_db.ErrorLog.ErrorState = None
+          sqlite_db.ErrorLog.UserName = "jmarr" }
     let q =
         insert {
-            for e in main.ErrorLog do
+            for e in sqlite_db.ErrorLog do
             entity sample
             excludeColumn e.ErrorLogID
             timeout (System.TimeSpan.FromSeconds 45.0)
@@ -244,11 +244,11 @@ let ``Insert with Timeout``() = task {
     cmd.CommandTimeout =! 45
 }
 
-[<Test; Ignore("DuckDB integration tests require sqlite_scanner extension setup")>]
+[<Test>]
 let ``Update Set Individual Fields``() = task {
     let! result = 
         updateTask db {
-            for e in main.ErrorLog do
+            for e in sqlite_db.ErrorLog do
             set e.ErrorNumber 123L
             set e.ErrorMessage "ERROR #123"
             set e.ErrorLine (Some 999L)
@@ -259,11 +259,11 @@ let ``Update Set Individual Fields``() = task {
     printfn "result: %i" result
 }
 
-[<Test; Ignore("DuckDB integration tests require sqlite_scanner extension setup")>]
+[<Test>]
 let ``UpdateAsync Set Individual Fields``() = task {
     let! result = 
         updateTask db {
-            for e in main.ErrorLog do
+            for e in sqlite_db.ErrorLog do
             set e.ErrorNumber 123L
             set e.ErrorMessage "ERROR #123"
             set e.ErrorLine (Some 999L)
@@ -274,24 +274,24 @@ let ``UpdateAsync Set Individual Fields``() = task {
     printfn "result: %i" result
 }
 
-[<Test; Ignore("DuckDB integration tests require sqlite_scanner extension setup")>]
+[<Test>]
 let ``Update Entity``() = task {
     let errorLog = 
         {
-            main.ErrorLog.ErrorLogID = 2L
-            main.ErrorLog.ErrorTime = System.DateTime.Now
-            main.ErrorLog.ErrorLine = Some 888L
-            main.ErrorLog.ErrorMessage = "ERROR #2"
-            main.ErrorLog.ErrorNumber = 500L
-            main.ErrorLog.ErrorProcedure = None
-            main.ErrorLog.ErrorSeverity = None
-            main.ErrorLog.ErrorState = None
-            main.ErrorLog.UserName = "jmarr"
+            sqlite_db.ErrorLog.ErrorLogID = 2L
+            sqlite_db.ErrorLog.ErrorTime = System.DateTime.Now
+            sqlite_db.ErrorLog.ErrorLine = Some 888L
+            sqlite_db.ErrorLog.ErrorMessage = "ERROR #2"
+            sqlite_db.ErrorLog.ErrorNumber = 500L
+            sqlite_db.ErrorLog.ErrorProcedure = None
+            sqlite_db.ErrorLog.ErrorSeverity = None
+            sqlite_db.ErrorLog.ErrorState = None
+            sqlite_db.ErrorLog.UserName = "jmarr"
         }
 
     let! result = 
         updateTask db {
-            for e in main.ErrorLog do
+            for e in sqlite_db.ErrorLog do
             entity errorLog
             excludeColumn e.ErrorLogID
             where (e.ErrorLogID = errorLog.ErrorLogID)
@@ -300,12 +300,12 @@ let ``Update Entity``() = task {
     printfn "result: %i" result
 }
 
-[<Test; Ignore("DuckDB integration tests require sqlite_scanner extension setup")>]
+[<Test>]
 let ``Update with Timeout``() = task {
     use! ctx = db.OpenContextAsync()
     let q =
         update {
-            for c in main.Customer do
+            for c in sqlite_db.Customer do
             set c.FirstName "John"
             where (c.CustomerID = -1L)
             timeout (System.TimeSpan.FromSeconds 45.0)
@@ -316,34 +316,34 @@ let ``Update with Timeout``() = task {
     cmd.CommandTimeout =! 45
 }
 
-[<Test; Ignore("DuckDB integration tests require sqlite_scanner extension setup")>]
+[<Test>]
 let ``Delete Test``() = task {
     let! result = 
         deleteTask db {
-            for e in main.ErrorLog do
+            for e in sqlite_db.ErrorLog do
             where (e.ErrorLogID = 5L)
         }
 
     printfn "result: %i" result
 }
 
-[<Test; Ignore("DuckDB integration tests require sqlite_scanner extension setup")>]
+[<Test>]
 let ``DeleteAsync Test``() = task {
     let! result = 
         deleteTask db {
-            for e in main.ErrorLog do
+            for e in sqlite_db.ErrorLog do
             where (e.ErrorLogID = 5L)
         }
 
     printfn "result: %i" result
 }
 
-[<Test; Ignore("DuckDB integration tests require sqlite_scanner extension setup")>]
+[<Test>]
 let ``Delete with Timeout``() = task {
     use! ctx = db.OpenContextAsync()
     let q =
         delete {
-            for c in main.Customer do
+            for c in sqlite_db.Customer do
             where (c.CustomerID = -1L)
             timeout (System.TimeSpan.FromSeconds 45.0)
         }
@@ -352,7 +352,7 @@ let ``Delete with Timeout``() = task {
     cmd.CommandTimeout =! 45
 }
 
-[<Test; Ignore("DuckDB integration tests require sqlite_scanner extension setup")>]
+[<Test>]
 let ``Multiple Inserts``() = task {
     use! shared = db.OpenContextAsync()
 
@@ -360,7 +360,7 @@ let ``Multiple Inserts``() = task {
 
     let! _ = 
         deleteTask shared {
-            for e in main.ErrorLog do
+            for e in sqlite_db.ErrorLog do
             deleteAll
         }
 
@@ -375,7 +375,7 @@ let ``Multiple Inserts``() = task {
     | Some errorLogs ->
         let! rowsInserted = 
             insert {
-                for e in main.ErrorLog do
+                for e in sqlite_db.ErrorLog do
                 entities errorLogs
                 excludeColumn e.ErrorLogID
             }
@@ -388,7 +388,7 @@ let ``Multiple Inserts``() = task {
 
     let! results =
         selectTask shared {
-            for e in main.ErrorLog do
+            for e in sqlite_db.ErrorLog do
             select e.ErrorNumber
         }
 
@@ -399,7 +399,7 @@ let ``Multiple Inserts``() = task {
     shared.RollbackTransaction()
 }
 
-[<Test; Ignore("DuckDB integration tests require sqlite_scanner extension setup")>]
+[<Test>]
 let ``Distinct Test``() = task {
     use! shared = db.OpenContextAsync()
 
@@ -407,7 +407,7 @@ let ``Distinct Test``() = task {
 
     let! _ = 
         deleteTask shared {
-            for e in main.ErrorLog do
+            for e in sqlite_db.ErrorLog do
             deleteAll
         }
 
@@ -420,7 +420,7 @@ let ``Distinct Test``() = task {
     | Some errorLogs ->
         let! rowsInserted = 
             insert {
-                for e in main.ErrorLog do
+                for e in sqlite_db.ErrorLog do
                 entities errorLogs
                 excludeColumn e.ErrorLogID
             }
@@ -433,13 +433,13 @@ let ``Distinct Test``() = task {
 
     let! results =
         selectTask shared {
-            for e in main.ErrorLog do
+            for e in sqlite_db.ErrorLog do
             select e.ErrorNumber
         }
 
     let! distinctResults =
         selectTask shared {
-            for e in main.ErrorLog do
+            for e in sqlite_db.ErrorLog do
             select e.ErrorNumber
             distinct
         }
@@ -450,7 +450,7 @@ let ``Distinct Test``() = task {
     shared.RollbackTransaction()
 }
 
-[<Test; Ignore("DuckDB integration tests require sqlite_scanner extension setup")>]
+[<Test>]
 let ``Count Test``() = task {
     use! shared = db.OpenContextAsync()
     shared.BeginTransaction()
@@ -458,7 +458,7 @@ let ``Count Test``() = task {
     for i in [0..2] do
         let! result = 
             insert {
-                for e in main.ErrorLog do
+                for e in sqlite_db.ErrorLog do
                 entity stubbedErrorLog
                 getId e.ErrorLogID
             }
@@ -467,7 +467,7 @@ let ``Count Test``() = task {
 
     let! count = 
         select {
-            for e in main.ErrorLog do
+            for e in sqlite_db.ErrorLog do
             count
         }
         |> shared.CountAsync
@@ -476,14 +476,14 @@ let ``Count Test``() = task {
     shared.RollbackTransaction()
 }
 
-[<Test; Ignore("DuckDB integration tests require sqlite_scanner extension setup")>]
+[<Test>]
 let ``OnConflictDoUpdate``() = task {
     use! shared = db.OpenContextAsync()
     shared.BeginTransaction()
 
     let upsertAddress address = 
         insertTask shared {
-            for a in main.Address do
+            for a in sqlite_db.Address do
             entity address
             onConflictDoUpdate a.AddressID (
                 a.AddressLine1,
@@ -498,26 +498,26 @@ let ``OnConflictDoUpdate``() = task {
 
     let queryAddress id = 
         selectTask shared {
-            for a in main.Address do
+            for a in sqlite_db.Address do
             where (a.AddressID = id)
             toList
         }
 
     let newAddress = 
-         { main.Address.AddressID = 5000
-         ; main.Address.AddressLine1 = "123 Main St"
-         ; main.Address.AddressLine2 = None
-         ; main.Address.City = "Portland"
-         ; main.Address.StateProvince = "OR"
-         ; main.Address.CountryRegion = "United States"
-         ; main.Address.PostalCode = "97205"
-         ; main.Address.rowguid = ""
-         ; main.Address.ModifiedDate = System.DateTime.Now }
+         { sqlite_db.Address.AddressID = 5000
+         ; sqlite_db.Address.AddressLine1 = "123 sqlite_db St"
+         ; sqlite_db.Address.AddressLine2 = None
+         ; sqlite_db.Address.City = "Portland"
+         ; sqlite_db.Address.StateProvince = "OR"
+         ; sqlite_db.Address.CountryRegion = "United States"
+         ; sqlite_db.Address.PostalCode = "97205"
+         ; sqlite_db.Address.rowguid = ""
+         ; sqlite_db.Address.ModifiedDate = System.DateTime.Now }
 
     do! upsertAddress newAddress
     let! result1 = queryAddress 5000L
 
-    let r1 = result1 : main.Address list
+    let r1 = result1 : sqlite_db.Address list
     r1.Length =! 1
     r1.[0] =! newAddress
 
@@ -526,18 +526,18 @@ let ``OnConflictDoUpdate``() = task {
     do! upsertAddress updatedAddress
     let! result2 = queryAddress 5000L
 
-    let r2 = result2 : main.Address list
+    let r2 = result2 : sqlite_db.Address list
     r2.Length =! 1
     r2.[0] =! updatedAddress
 
     shared.RollbackTransaction()
 }
 
-[<Test; Ignore("DuckDB integration tests require sqlite_scanner extension setup")>]
+[<Test>]
 let ``SqlFn - SQLite functions smoke test``() = task {
     let! results =
         selectTask db {
-            for a in main.Address do
+            for a in sqlite_db.Address do
             select (a.City, length a.City, upper a.City, ifnull(a.AddressLine2, "N/A"))
             take 1
         }
@@ -551,7 +551,7 @@ let ``SqlFn - SQLite functions smoke test``() = task {
 /// Reproduces https://github.com/JordanMarr/SqlHydra/issues/123
 /// SQLite stores DateOnly as a datetime string (e.g. '2024-06-20 00:00:00'),
 /// which causes DateOnly.Parse to fail with a FormatException on read-back.
-[<Test; Ignore("DuckDB integration tests require sqlite_scanner extension setup")>]
+[<Test>]
 let ``DateOnly round-trip in SQLite``() = task {
     // Create an in-memory SQLite database with a DateOnly column (stored as text)
     use conn = new DuckDB.NET.Data.DuckDBConnection("Data Source=:memory:")

@@ -19,7 +19,7 @@ open DuckDb.AdventureWorksNet10
 let ``Simple Where``() = 
     let sql = 
         select {
-            for a in main.Address do
+            for a in sqlite_db.Address do
             where (a.City = "Dallas")
             orderBy a.City
         }
@@ -31,18 +31,18 @@ let ``Simple Where``() =
 let ``Select 1 Column``() = 
     let sql =
         select {
-            for a in main.Address do
+            for a in sqlite_db.Address do
             select (a.City)
         }
         |> toSql
 
-    sql =! "SELECT \"a\".\"City\" FROM \"main\".\"Address\" AS \"a\""
+    sql =! "SELECT \"a\".\"City\" FROM \"sqlite_db\".\"Address\" AS \"a\""
 
 [<Test>]
 let ``Select 2 Columns``() = 
     let sql =
         select {
-            for h in main.SalesOrderHeader do
+            for h in sqlite_db.SalesOrderHeader do
             select (h.CustomerID, h.OnlineOrderFlag)
         }
         |> toSql
@@ -53,8 +53,8 @@ let ``Select 2 Columns``() =
 let ``Select 1 Table and 1 Column``() = 
     let sql =
         select {
-            for o in main.SalesOrderHeader do
-            join d in main.SalesOrderDetail on (o.SalesOrderID = d.SalesOrderID)
+            for o in sqlite_db.SalesOrderHeader do
+            join d in sqlite_db.SalesOrderDetail on (o.SalesOrderID = d.SalesOrderID)
             where (o.OnlineOrderFlag = 1L)
             select (o, d.LineTotal)
         }
@@ -66,7 +66,7 @@ let ``Select 1 Table and 1 Column``() =
 let ``Where with Option Type``() = 
     let sql = 
         select {
-            for a in main.Address do
+            for a in sqlite_db.Address do
             where (a.AddressLine2 <> None)
         }
         |> toSql
@@ -77,18 +77,18 @@ let ``Where with Option Type``() =
 let ``Where Not Like``() = 
     let sql =
         select {
-            for a in main.Address do
+            for a in sqlite_db.Address do
             where (a.City <>% "S%")
         }
         |> toSql
 
-    sql =! """SELECT * FROM "main"."Address" AS "a" WHERE (NOT (LOWER("a"."City") like LOWER(@p0)))"""
+    sql =! """SELECT * FROM "sqlite_db"."Address" AS "a" WHERE (NOT (LOWER("a"."City") like LOWER(@p0)))"""
 
 [<Test>]
 let ``Or Where``() = 
     let sql = 
         select {
-            for a in main.Address do
+            for a in sqlite_db.Address do
             where (a.City = "Chicago" || a.City = "Dallas")
         }
         |> toSql
@@ -99,7 +99,7 @@ let ``Or Where``() =
 let ``And Where``() = 
     let sql = 
         select {
-            for a in main.Address do
+            for a in sqlite_db.Address do
             where (a.City = "Chicago" && a.City = "Dallas")
         }
         |> toSql
@@ -110,7 +110,7 @@ let ``And Where``() =
 let ``Where with AND and OR in Parenthesis``() = 
     let sql = 
         select {
-            for a in main.Address do
+            for a in sqlite_db.Address do
             where (a.City = "Chicago" && (a.AddressLine2 = Some "abc" || isNullValue a.AddressLine2))
         }
         |> toSql
@@ -123,7 +123,7 @@ let ``Where with AND and OR in Parenthesis``() =
 let ``Where value and column are swapped``() = 
     let sql = 
         select {
-            for a in main.Address do
+            for a in sqlite_db.Address do
             where (5L < a.AddressID && 20L >= a.AddressID)
         }
         |> toSql
@@ -134,7 +134,7 @@ let ``Where value and column are swapped``() =
 let ``Where Not Binary``() = 
     let sql = 
         select {
-            for a in main.Address do
+            for a in sqlite_db.Address do
             where (not (a.City = "Chicago" && a.City = "Dallas"))
         }
         |> toSql
@@ -145,7 +145,7 @@ let ``Where Not Binary``() =
 let ``Where Customer isIn List``() = 
     let sql = 
         select {
-            for c in main.Customer do
+            for c in sqlite_db.Customer do
             where (isIn c.CustomerID [30018L;29545L;29954L])
         }
         |> toSql
@@ -156,7 +156,7 @@ let ``Where Customer isIn List``() =
 let ``Where Customer |=| List``() = 
     let sql = 
         select {
-            for c in main.Customer do
+            for c in sqlite_db.Customer do
             where (c.CustomerID |=| [30018L;29545L;29954L])
         }
         |> toSql
@@ -167,7 +167,7 @@ let ``Where Customer |=| List``() =
 let ``Where Customer |=| Array``() = 
     let sql = 
         select {
-            for c in main.Customer do
+            for c in sqlite_db.Customer do
             where (c.CustomerID |=| [| 30018L;29545L;29954L |])
         }
         |> toSql
@@ -178,7 +178,7 @@ let ``Where Customer |=| Array``() =
 let ``Where Customer |=| Seq``() = 
     let buildQuery (values: int64 seq) =                
         select {
-            for c in main.Customer do
+            for c in sqlite_db.Customer do
             where (c.CustomerID |=| values)
         }
 
@@ -190,7 +190,7 @@ let ``Where Customer |=| Seq``() =
 let ``Where Customer |<>| List``() = 
     let sql = 
         select {
-            for c in main.Customer do
+            for c in sqlite_db.Customer do
             where (c.CustomerID |<>| [ 30018L;29545L;29954L ])
         }
         |> toSql
@@ -201,113 +201,113 @@ let ``Where Customer |<>| List``() =
 let ``Inner Join``() = 
     let sql =
         select {
-            for o in main.SalesOrderHeader do
-            join d in main.SalesOrderDetail on (o.SalesOrderID = d.SalesOrderID)
+            for o in sqlite_db.SalesOrderHeader do
+            join d in sqlite_db.SalesOrderDetail on (o.SalesOrderID = d.SalesOrderID)
             select o
         }
         |> toSql
 
-    sql.Contains("INNER JOIN \"main\".\"SalesOrderDetail\" AS \"d\" ON (\"o\".\"SalesOrderID\" = \"d\".\"SalesOrderID\")") =! true
+    sql.Contains("INNER JOIN \"sqlite_db\".\"SalesOrderDetail\" AS \"d\" ON (\"o\".\"SalesOrderID\" = \"d\".\"SalesOrderID\")") =! true
 
 [<Test>]
 let ``Left Join``() = 
     let sql =
         select {
-            for o in main.SalesOrderHeader do
-            leftJoin d in main.SalesOrderDetail on (o.SalesOrderID = d.Value.SalesOrderID)
+            for o in sqlite_db.SalesOrderHeader do
+            leftJoin d in sqlite_db.SalesOrderDetail on (o.SalesOrderID = d.Value.SalesOrderID)
             select o
         }
         |> toSql
 
-    sql.Contains("LEFT JOIN \"main\".\"SalesOrderDetail\" AS \"d\" ON (\"o\".\"SalesOrderID\" = \"d\".\"SalesOrderID\")") =! true
+    sql.Contains("LEFT JOIN \"sqlite_db\".\"SalesOrderDetail\" AS \"d\" ON (\"o\".\"SalesOrderID\" = \"d\".\"SalesOrderID\")") =! true
 
 [<Test>]
 let ``Inner Join - Multi Column``() = 
     let sql =
         select {
-            for o in main.SalesOrderHeader do
-            join d in main.SalesOrderDetail on ((o.SalesOrderID, o.ModifiedDate) = (d.SalesOrderID, d.ModifiedDate))
+            for o in sqlite_db.SalesOrderHeader do
+            join d in sqlite_db.SalesOrderDetail on ((o.SalesOrderID, o.ModifiedDate) = (d.SalesOrderID, d.ModifiedDate))
             select o
         }
         |> toSql
 
-    sql.Contains("INNER JOIN \"main\".\"SalesOrderDetail\" AS \"d\" ON (\"o\".\"SalesOrderID\" = \"d\".\"SalesOrderID\" AND \"o\".\"ModifiedDate\" = \"d\".\"ModifiedDate\")") =! true
+    sql.Contains("INNER JOIN \"sqlite_db\".\"SalesOrderDetail\" AS \"d\" ON (\"o\".\"SalesOrderID\" = \"d\".\"SalesOrderID\" AND \"o\".\"ModifiedDate\" = \"d\".\"ModifiedDate\")") =! true
 
 [<Test>]
 let ``Left Join - Multi Column``() = 
     let sql =
         select {
-            for o in main.SalesOrderHeader do
-            leftJoin d in main.SalesOrderDetail on ((o.SalesOrderID, o.ModifiedDate) = (d.Value.SalesOrderID, d.Value.ModifiedDate))
+            for o in sqlite_db.SalesOrderHeader do
+            leftJoin d in sqlite_db.SalesOrderDetail on ((o.SalesOrderID, o.ModifiedDate) = (d.Value.SalesOrderID, d.Value.ModifiedDate))
             select o
         }
         |> toSql
 
-    sql.Contains("LEFT JOIN \"main\".\"SalesOrderDetail\" AS \"d\" ON (\"o\".\"SalesOrderID\" = \"d\".\"SalesOrderID\" AND \"o\".\"ModifiedDate\" = \"d\".\"ModifiedDate\")") =! true
+    sql.Contains("LEFT JOIN \"sqlite_db\".\"SalesOrderDetail\" AS \"d\" ON (\"o\".\"SalesOrderID\" = \"d\".\"SalesOrderID\" AND \"o\".\"ModifiedDate\" = \"d\".\"ModifiedDate\")") =! true
 
 [<Test>]
 let ``Correlated Subquery``() = 
     let latestOrderByCustomer = 
         select {
-            for d in main.SalesOrderHeader do
-            correlate od in main.SalesOrderHeader
+            for d in sqlite_db.SalesOrderHeader do
+            correlate od in sqlite_db.SalesOrderHeader
             where (d.CustomerID = od.CustomerID)
             select (maxBy d.OrderDate)
         }
 
     let sql = 
         select {
-            for od in main.SalesOrderHeader do
+            for od in sqlite_db.SalesOrderHeader do
             where (od.OrderDate = subqueryOne latestOrderByCustomer)
         }        
         |> toSql
 
     sql =!
-        "SELECT * FROM \"main\".\"SalesOrderHeader\" AS \"od\" WHERE (\"od\".\"OrderDate\" = \
-        (SELECT MAX(\"d\".\"OrderDate\") AS __hydra_expr_0 FROM \"main\".\"SalesOrderHeader\" AS \"d\" \
+        "SELECT * FROM \"sqlite_db\".\"SalesOrderHeader\" AS \"od\" WHERE (\"od\".\"OrderDate\" = \
+        (SELECT MAX(\"d\".\"OrderDate\") AS __hydra_expr_0 FROM \"sqlite_db\".\"SalesOrderHeader\" AS \"d\" \
         WHERE (\"d\".\"CustomerID\" = \"od\".\"CustomerID\")))".RemoveHydraExpr()
 
 [<Test>]
 let ``Delete Query with Where``() = 
     let sql = 
         delete {
-            for c in main.Customer do
+            for c in sqlite_db.Customer do
             where (c.CustomerID |<>| [ 30018L;29545L;29954L ])
         }
         |> toSql
 
-    sql.Contains("DELETE FROM \"main\".\"Customer\"") =! true
-    sql.Contains("WHERE (\"main\".\"Customer\".\"CustomerID\" NOT IN (@p0, @p1, @p2))") =! true
+    sql.Contains("DELETE FROM \"sqlite_db\".\"Customer\"") =! true
+    sql.Contains("WHERE (\"sqlite_db\".\"Customer\".\"CustomerID\" NOT IN (@p0, @p1, @p2))") =! true
 
 [<Test>]
 let ``Delete All``() = 
     let sql = 
         delete {
-            for c in main.Customer do
+            for c in sqlite_db.Customer do
             deleteAll
         }
         |> toSql
 
-    sql =! "DELETE FROM \"main\".\"Customer\""
+    sql =! "DELETE FROM \"sqlite_db\".\"Customer\""
 
 [<Test>]
 let ``Update Query with Where``() = 
     let sql = 
         update {
-            for c in main.Customer do
+            for c in sqlite_db.Customer do
             set c.FirstName "John"
             set c.LastName "Doe"
             where (c.CustomerID = 123L)
         }
         |> toUpdateSql
 
-    sql =! """UPDATE "main"."Customer" SET "FirstName" = @p0, "LastName" = @p1 WHERE ("main"."Customer"."CustomerID" = @p2)"""
+    sql =! """UPDATE "sqlite_db"."Customer" SET "FirstName" = @p0, "LastName" = @p1 WHERE ("sqlite_db"."Customer"."CustomerID" = @p2)"""
 
 [<Test>]
 let ``Update Query with multiple Wheres``() = 
     let sql = 
         update {
-            for c in main.Customer do
+            for c in sqlite_db.Customer do
             set c.FirstName "John"
             set c.LastName "Doe"
             where (c.CustomerID = 123L)
@@ -315,27 +315,27 @@ let ``Update Query with multiple Wheres``() =
         }
         |> toUpdateSql
 
-    sql =! """UPDATE "main"."Customer" SET "FirstName" = @p0, "LastName" = @p1 WHERE (("main"."Customer"."CustomerID" = @p2) AND ("main"."Customer"."FirstName" = @p3))"""
+    sql =! """UPDATE "sqlite_db"."Customer" SET "FirstName" = @p0, "LastName" = @p1 WHERE (("sqlite_db"."Customer"."CustomerID" = @p2) AND ("sqlite_db"."Customer"."FirstName" = @p3))"""
 
 [<Test>]
 let ``Update Query with No Where``() = 
     let sql = 
         update {
-            for c in main.Customer do
+            for c in sqlite_db.Customer do
             set c.FirstName "John"
             set c.LastName "Doe"
             updateAll
         }
         |> toUpdateSql
 
-    "UPDATE \"main\".\"Customer\" SET \"FirstName\" = @p0, \"LastName\" = @p1" =! sql
+    "UPDATE \"sqlite_db\".\"Customer\" SET \"FirstName\" = @p0, \"LastName\" = @p1" =! sql
 
 [<Test>]
 let ``Update should fail without where or updateAll``() = 
     try 
         let _ = 
             update {
-                for c in main.Customer do
+                for c in sqlite_db.Customer do
                 set c.FirstName "John"
                 set c.LastName "Doe"
             }
@@ -348,7 +348,7 @@ let ``Update should pass because where exists``() =
     try 
         let _ = 
             update {
-                for c in main.Customer do
+                for c in sqlite_db.Customer do
                 set c.FirstName "John"
                 set c.LastName "Doe"
                 where (c.CustomerID = 1L)
@@ -360,7 +360,7 @@ let ``Update should pass because where exists``() =
 [<Test>]
 let ``Update should pass because updateAll exists``() = 
     update {
-        for c in main.Customer do
+        for c in sqlite_db.Customer do
         set c.FirstName "John"
         set c.LastName "Doe"
         updateAll
@@ -372,7 +372,7 @@ let ``Update should pass because updateAll exists``() =
 let ``Update with where followed by updateAll should fail``() = 
     try
         update {
-            for c in main.Customer do
+            for c in sqlite_db.Customer do
             set c.FirstName "John"
             set c.LastName "Doe"
             where (c.CustomerID = 1L)
@@ -387,7 +387,7 @@ let ``Update with where followed by updateAll should fail``() =
 let ``Update with updateAll followed by where should fail``() = 
     try
         update {
-            for c in main.Customer do
+            for c in sqlite_db.Customer do
             set c.FirstName "John"
             set c.LastName "Doe"
             updateAll
@@ -402,36 +402,36 @@ let ``Update with updateAll followed by where should fail``() =
 let ``Insert Query with Identity``() = 
     let sql = 
         insert {
-            for b in table<main.BuildVersion> do
+            for b in table<sqlite_db.BuildVersion> do
             entity
                 {
-                    main.BuildVersion.SystemInformationID = 0L
-                    main.BuildVersion.``Database Version`` = "v1.0"
-                    main.BuildVersion.VersionDate = System.DateTime.Today
-                    main.BuildVersion.ModifiedDate = System.DateTime.Today
+                    sqlite_db.BuildVersion.SystemInformationID = 0L
+                    sqlite_db.BuildVersion.``Database Version`` = "v1.0"
+                    sqlite_db.BuildVersion.VersionDate = System.DateTime.Today
+                    sqlite_db.BuildVersion.ModifiedDate = System.DateTime.Today
                 }
             getId b.SystemInformationID
         }
         |> toInsertSql
 
-    sql =! "INSERT INTO \"main\".\"BuildVersion\" (\"Database Version\", \"VersionDate\", \"ModifiedDate\") VALUES (@p0, @p1, @p2);select last_insert_rowid() as id" 
+    sql =! "INSERT INTO \"sqlite_db\".\"BuildVersion\" (\"Database Version\", \"VersionDate\", \"ModifiedDate\") VALUES (@p0, @p1, @p2);select last_insert_rowid() as id" 
 
 [<Test>]
 let ``Inline Aggregates``() = 
     let sql =
         select {
-            for o in main.SalesOrderHeader do
+            for o in sqlite_db.SalesOrderHeader do
             select (countBy o.SalesOrderID)
         }
         |> toSql
 
-    sql =! "SELECT COUNT(\"o\".\"SalesOrderID\") AS __hydra_expr_0 FROM \"main\".\"SalesOrderHeader\" AS \"o\"".RemoveHydraExpr()
+    sql =! "SELECT COUNT(\"o\".\"SalesOrderID\") AS __hydra_expr_0 FROM \"sqlite_db\".\"SalesOrderHeader\" AS \"o\"".RemoveHydraExpr()
 
 [<Test>]
 let ``Implicit Casts``() = 
     let _ =
         select {
-            for p in main.Product do
+            for p in sqlite_db.Product do
             where (p.ListPrice > 5)
         }
 
@@ -442,7 +442,7 @@ let ``Implicit Casts``() =
 let ``Implicit Casts Option aciq's example``() = 
     let _ =
         select {
-            for e in main.ErrorLog do
+            for e in sqlite_db.ErrorLog do
             where (e.ErrorSeverity = Some 1)
         }
 
@@ -453,7 +453,7 @@ let ``Implicit Casts Option aciq's example``() =
 let ``Implicit Casts Option``() =
     let _ =
         select {
-            for p in main.Product do
+            for p in sqlite_db.Product do
             where (p.Weight = Some 5)
         }
 
@@ -470,8 +470,8 @@ let ``Where Join with DateTime Comparisons - GitHub Issue 124``() =
 
     let sql =
         select {
-            for o in main.SalesOrderHeader do
-            join d in main.SalesOrderDetail on (o.SalesOrderID = d.SalesOrderID)
+            for o in sqlite_db.SalesOrderHeader do
+            join d in sqlite_db.SalesOrderDetail on (o.SalesOrderID = d.SalesOrderID)
             where (o.OrderDate = lBound && lBound <= d.ModifiedDate && d.ModifiedDate <= uBound)
             select (o, d)
         }

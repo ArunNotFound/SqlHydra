@@ -8,16 +8,15 @@ open DuckDb.AdventureWorksNet10
 #endif
 
 
-let connectionString =     
-    let assembly = System.Reflection.Assembly.GetExecutingAssembly().Location |> System.IO.FileInfo
-    let thisDir = assembly.Directory.Parent.Parent.Parent.FullName
-    let dbPath = System.IO.Path.Combine(thisDir, "TestData", "AdventureWorksLT.db")
-    let dbTempPath = dbPath.Replace(".db", "_Temp.db")
+let assembly = System.Reflection.Assembly.GetExecutingAssembly().Location |> System.IO.FileInfo
+let thisDir = assembly.Directory.Parent.Parent.Parent.FullName
+let dbPath = System.IO.Path.Combine(thisDir, "TestData", "AdventureWorksLT.db")
+let dbTempPath = dbPath.Replace(".db", "_Temp.db")
 
-    // Create a temp copy of sqlite db for testing
-    File.Copy(dbPath, dbTempPath, true)
+// Create a temp copy of sqlite db for testing
+File.Copy(dbPath, dbTempPath, true)
 
-    $"Data Source={dbTempPath}"
+let connectionString = "Data Source=:memory:"
 
 let db = QueryContextFactory.Create(connectionString, printf "SQL: %O")
 //let getConnection() = 

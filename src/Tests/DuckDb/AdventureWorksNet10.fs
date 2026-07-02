@@ -9,7 +9,7 @@ module Version =
     let ns = "Sqlite.AdventureWorksNet10"
     SqlHydra.Query.VersionCheck.assertIsCompatible cli ns
 
-module main =
+module sqlite_db =
 
     [<CLIMutable>]
     type Address =
@@ -199,9 +199,19 @@ type QueryContextFactory =
         let createConn () : System.Data.Common.DbConnection =
             new DuckDB.NET.Data.DuckDBConnection(connectionString)
 
+        let getPath() =
+            let assembly = System.Reflection.Assembly.GetExecutingAssembly().Location |> System.IO.FileInfo
+            let thisDir = assembly.Directory.Parent.Parent.Parent.FullName
+            let dbPath = System.IO.Path.Combine(thisDir, "TestData", "AdventureWorksLT.db")
+            dbPath.Replace(".db", "_Temp.db").Replace(@"\", @"\\")
+
         let openContext () =
             let conn = createConn ()
             conn.Open()
+            use cmd = conn.CreateCommand()
+            let path = getPath()
+            cmd.CommandText <- $"INSTALL sqlite; LOAD sqlite; ATTACH '{path}' AS sqlite_db (TYPE sqlite);"
+            cmd.ExecuteNonQuery() |> ignore
             let ctx = new QueryContext(conn, emitter)
             sqlLogger |> Option.iter (fun logger -> ctx.Logger <- logger)
             ctx
@@ -210,6 +220,10 @@ type QueryContextFactory =
             task {
                 let conn = createConn ()
                 do! conn.OpenAsync()
+                use cmd = conn.CreateCommand()
+                let path = getPath()
+                cmd.CommandText <- $"INSTALL sqlite; LOAD sqlite; ATTACH '{path}' AS sqlite_db (TYPE sqlite);"
+                do! cmd.ExecuteNonQueryAsync() |> Async.AwaitTask |> Async.Ignore
                 let ctx = new QueryContext(conn, emitter)
                 sqlLogger |> Option.iter (fun logger -> ctx.Logger <- logger)
                 return ctx
