@@ -5,7 +5,20 @@ Type-safe SQL generation for F#. Generate types from your database, query with s
 [![SqlHydra.Cli NuGet](https://img.shields.io/nuget/v/SqlHydra.Cli.svg?style=flat-square&label=SqlHydra.Cli)](https://www.nuget.org/packages/SqlHydra.Cli/)
 [![SqlHydra.Query NuGet](https://img.shields.io/nuget/v/SqlHydra.Query.svg?style=flat-square&label=SqlHydra.Query)](https://www.nuget.org/packages/SqlHydra.Query/)
 
-**Supported Databases:** SQL Server | PostgreSQL | SQLite | Oracle | MySQL
+**Supported Databases:** SQL Server | PostgreSQL | SQLite | Oracle | MySQL | DuckDB | **Elasticsearch** (Preview)
+
+---
+
+## 🚀 Elasticsearch Integration (Current Accomplishments & Roadmap)
+
+**What we accomplished today (Phase 1 & Phase 2.2):**
+- **Phase 1 (ES SQL):** Successfully built the core `ElasticsearchProvider` and `ElasticsearchSchemaProvider`. SqlHydra can now securely poll the `_mapping` API and auto-generate F# properties from Elasticsearch JSON indexes.
+- **Phase 2.1 (Native JSON AST):** Prototyped the `NativeAst.fs` F# `Expr` tree to bypass standard SQL mapping and strongly emit the Elasticsearch JSON Query DSL using the custom `esquery { ... }` computation expression.
+- **Phase 2.2 (Advanced ES Modeling):** Successfully bound advanced NoSQL modeling types into our DSL. SqlHydra can now fluently generate `nested`, `has_child`, and `has_parent` Elasticsearch queries directly from F#!
+
+**Pending Work (Upcoming):**
+- **Phase 2.3 (Semantic Search & KNN):** Expose `knn` vector similarities, `fuzzy`, and `multi_match` queries in F# to leverage ES 8/9 vector embeddings natively.
+- **Phase 2.4 (Index Management):** Scaffold DDL equivalent commands to trigger `_reindex`, create indices, and alter mapping metadata purely from typed F#.
 
 ---
 
