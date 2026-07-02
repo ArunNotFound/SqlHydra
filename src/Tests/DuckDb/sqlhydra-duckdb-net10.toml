@@ -1,0 +1,16 @@
+[connection]
+connection = "Data Source=../TestData/AdventureWorksLT.db"
+
+[output]
+output = "AdventureWorksNet10.fs"
+namespace = "DuckDb.AdventureWorksNet10"
+
+[options]
+is_cli_mutable = true
+is_mutable_properties = true
+nullable_property_type = "Option"
+provider_db_type_attributes = false
+table_declarations = true
+
+[readers]
+reader_type = "System.Data.Common.DbDataReader"

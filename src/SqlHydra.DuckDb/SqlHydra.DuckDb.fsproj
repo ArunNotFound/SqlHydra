@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="DuckDbDataTypes.fs" />
+    <Compile Include="DuckDbSchemaProvider.fs" />
+    <Compile Include="Provider.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SqlHydra.Domain\SqlHydra.Domain.fsproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="DuckDB.NET.Data" Version="1.5.3" />
+  </ItemGroup>
+
+</Project>

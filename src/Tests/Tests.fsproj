@@ -54,9 +54,14 @@
     <Compile Include="UnitTests\ColumnFilters.fs" />
     <Compile Include="UnitTests\TableFilters.fs" />
     <Compile Include="UnitTests\SchemaTemplateTests.fs" />
+    <Compile Include="DuckDb\AdventureWorksNet10.fs" />
+    <Compile Include="DuckDb\DB.fs" />
+    <Compile Include="DuckDb\QueryUnitTests.fs" />
+    <Compile Include="DuckDb\QueryIntegrationTests.fs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Update="FSharp.Core" Version="10.1.201" />
+    <PackageReference Include="DuckDB.NET.Data" Version="1.5.3" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.5.0" />
     <PackageReference Include="NUnit" Version="3.14.0" />
     <PackageReference Include="NUnit3TestAdapter" Version="4.5.0" />
