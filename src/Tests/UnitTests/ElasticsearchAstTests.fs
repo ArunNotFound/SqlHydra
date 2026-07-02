@@ -85,7 +85,7 @@ let ``Sort and Search After Pagination Translation`` () =
         esquery {
             where (RTerm("category", "electronics"))
             sortBy "price"
-            searchAfter [| box 150.0; box "id_789" |]
+            searchAfter [ box 150.0; box "id_789" ]
         }
     let expected = """{"query": {"bool": {"must": [{"term": {"category": "electronics"}}]}}, "sort": [{"price": "asc"}], "search_after": [150,"id_789"]}"""
     test <@ json = expected @>
