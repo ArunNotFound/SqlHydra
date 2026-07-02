@@ -1,8 +1,7 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
-    <!--<TargetFramework>net8.0</TargetFramework>-->
+    <TargetFramework>net10.0</TargetFramework>
     <WarnOn>3390;$(WarnOn)</WarnOn>
     <NoWarn>
       <!-- Duplicate Package -->
@@ -25,20 +24,14 @@
     <Compile Include="Util.fs" />
     <Compile Include="Sqlite\TextTypeMapping.fs" />
     <Compile Include="Sqlite\PascalCaseNaming.fs" />
-    <Compile Include="Sqlite\AdventureWorksNet8.fs" Condition="'$(TargetFramework)' == 'net8.0'" />
-    <Compile Include="Sqlite\AdventureWorksNet9.fs" Condition="'$(TargetFramework)' == 'net9.0'" />
-    <Compile Include="Sqlite\AdventureWorksNet10.fs" Condition="'$(TargetFramework)' == 'net10.0'" />
+    <Compile Include="Sqlite\AdventureWorksNet10.fs" />
     <Compile Include="Sqlite\DB.fs" />
     <Compile Include="Sqlite\QueryUnitTests.fs" />
     <Compile Include="Sqlite\QueryIntegrationTests.fs" />
     <Compile Include="Sqlite\Generation.fs" />
     <Compile Include="Sqlite\SchemaProviderTests.fs" />
-    <Compile Include="SqlServer\AdventureWorksNet8.fs" Condition="'$(TargetFramework)' == 'net8.0'" />
-    <Compile Include="SqlServer\AdventureWorksNet9.fs" Condition="'$(TargetFramework)' == 'net9.0'" />
-    <Compile Include="SqlServer\AdventureWorksNet10.fs" Condition="'$(TargetFramework)' == 'net10.0'" />
-    <Compile Include="SqlServer\AdventureWorksNullableNet8.fs" Condition="'$(TargetFramework)' == 'net8.0'" />
-    <Compile Include="SqlServer\AdventureWorksNullableNet9.fs" Condition="'$(TargetFramework)' == 'net9.0'" />
-    <Compile Include="SqlServer\AdventureWorksNullableNet10.fs" Condition="'$(TargetFramework)' == 'net10.0'" />
+    <Compile Include="SqlServer\AdventureWorksNet10.fs" />
+    <Compile Include="SqlServer\AdventureWorksNullableNet10.fs" />
     <Compile Include="SqlServer\DB.fs" />
     <Compile Include="SqlServer\QueryUnitTests.fs" />
     <Compile Include="SqlServer\QueryIntegrationTests.fs" />
@@ -47,16 +40,12 @@
     <Compile Include="SqlServer\SelectTaskTests.fs" />
     <Compile Include="SqlServer\SelectAsyncTests.fs" />
     <Compile Include="SqlServer\Generation.fs" />
-    <Compile Include="Npgsql\AdventureWorksNet8.fs" Condition="'$(TargetFramework)' == 'net8.0'" />
-    <Compile Include="Npgsql\AdventureWorksNet9.fs" Condition="'$(TargetFramework)' == 'net9.0'" />
-    <Compile Include="Npgsql\AdventureWorksNet10.fs" Condition="'$(TargetFramework)' == 'net10.0'" />
+    <Compile Include="Npgsql\AdventureWorksNet10.fs" />
     <Compile Include="Npgsql\DB.fs" />
     <Compile Include="Npgsql\QueryUnitTests.fs" />
     <Compile Include="Npgsql\QueryIntegrationTests.fs" />
     <Compile Include="Npgsql\Generation.fs" />
-    <Compile Include="Oracle\AdventureWorksNet8.fs" Condition="'$(TargetFramework)' == 'net8.0'" />
-    <Compile Include="Oracle\AdventureWorksNet9.fs" Condition="'$(TargetFramework)' == 'net9.0'" />
-    <Compile Include="Oracle\AdventureWorksNet10.fs" Condition="'$(TargetFramework)' == 'net10.0'" />
+    <Compile Include="Oracle\AdventureWorksNet10.fs" />
     <Compile Include="Oracle\DB.fs" />
     <Compile Include="Oracle\QueryUnitTests.fs" />
     <Compile Include="Oracle\QueryIntegrationTests.fs" />
@@ -67,9 +56,7 @@
     <Compile Include="UnitTests\SchemaTemplateTests.fs" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Update="FSharp.Core" Version="8.0.100" Condition="'$(TargetFramework)' == 'net8.0'" />
-    <PackageReference Update="FSharp.Core" Version="9.0.201" Condition="'$(TargetFramework)' == 'net9.0'" />
-    <PackageReference Update="FSharp.Core" Version="10.1.201" Condition="'$(TargetFramework)' == 'net10.0'" />
+    <PackageReference Update="FSharp.Core" Version="10.1.201" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.5.0" />
     <PackageReference Include="NUnit" Version="3.14.0" />
     <PackageReference Include="NUnit3TestAdapter" Version="4.5.0" />

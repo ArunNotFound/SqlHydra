@@ -1,4 +1,4 @@
-﻿module Program
+module Program
 
 open System.IO
 open Fake.IO
@@ -30,15 +30,6 @@ Target.create "BuildQuery" <| fun _ ->
     |> (fun pkg -> Shell.Exec(Tools.dotnet, "build --configuration Release", pkg), pkg)
     |> (fun (code, pkg) -> if code <> 0 then failwith $"Could not build '{pkg}'package.'")
 
-Target.create "BuildCliNet8" <| fun _ ->
-    [ cli; tests ]
-    |> List.map (fun pkg -> Shell.Exec(Tools.dotnet, "build --configuration Release --framework net8.0", pkg), pkg)
-    |> List.iter (fun (code, pkg) -> if code <> 0 then failwith $"Could not build '{pkg}'package.'")
-
-Target.create "BuildCliNet9" <| fun _ ->
-    [ cli; tests ]
-    |> List.map (fun pkg -> Shell.Exec(Tools.dotnet, "build --configuration Release --framework net9.0", pkg), pkg)
-    |> List.iter (fun (code, pkg) -> if code <> 0 then failwith $"Could not build '{pkg}'package.'")
 
 Target.create "BuildCliNet10" <| fun _ ->
     [ cli; tests ]
@@ -48,13 +39,6 @@ Target.create "BuildCliNet10" <| fun _ ->
 Target.create "Build" <| fun _ ->
     printfn "Building all supported frameworks."
 
-Target.create "TestNet8" <| fun _ ->
-    let exitCode = Shell.Exec(Tools.dotnet, "test --configuration Release --framework net8.0", tests)
-    if exitCode <> 0 then failwith "Failed while running net8.0 tests"
-
-Target.create "TestNet9" <| fun _ ->
-    let exitCode = Shell.Exec(Tools.dotnet, "test --configuration Release --framework net9.0", tests)
-    if exitCode <> 0 then failwith "Failed while running net9.0 tests"
 
 Target.create "TestNet10" <| fun _ ->
     let exitCode = Shell.Exec(Tools.dotnet, "test --configuration Release --framework net10.0", tests)
@@ -92,9 +76,8 @@ Target.create "Publish" <| fun _ ->
     |> List.iter (fun (code, pkg) -> if code <> 0 then printfn $"ERROR: Could not publish '{pkg}' package. Error: {code}") // Display error and continue
 
 let dependencies = [
-    "Restore" ==> "BuildQuery" ==> "BuildCliNet8" ==> "BuildCliNet9" ==> "BuildCliNet10" ==> "Build"
-    "Build" ==> "TestNet8" ==> "TestNet9" ==> "TestNet10" ==> "Test"
-    //"BuildCliNet9" ==> "TestNet9" ==> "Test"
+    "Restore" ==> "BuildQuery" ==> "BuildCliNet10" ==> "Build"
+    "Build" ==> "TestNet10" ==> "Test"
     "Test" ==> "Pack" ==> "Publish"
 ]
 

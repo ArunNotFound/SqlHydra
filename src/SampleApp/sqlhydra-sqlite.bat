@@ -1,1 +1,1 @@
-dotnet run --project ..\SqlHydra.Sqlite --framework net5.0
+dotnet run --project ..\SqlHydra.Cli\SqlHydra.Cli.fsproj --framework net10.0 -- sqlite

@@ -29,8 +29,7 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: |
-            8.x
-            9.x
+            10.x
       - name: Restore
         working-directory: src/
         run: dotnet restore
@@ -41,16 +40,10 @@ jobs:
       - name: Build
         working-directory: src/
         run: dotnet build --no-restore
-      - name: Test net8.0
+      - name: Test net10.0
         working-directory: src/
-        run: dotnet test --framework net8.0
+        run: dotnet test --framework net10.0
 
       - name: Stop and Start containers
         working-directory: src/.devcontainer
         run: docker compose down && docker compose up -d mssql postgresql orcl
-      - name: Build
-        working-directory: src/
-        run: dotnet build --no-restore
-      - name: Test net9.0
-        working-directory: src/
-        run: dotnet test --framework net9.0

@@ -1,1 +1,0 @@
-dotnet run --project ..\SqlHydra.Cli --framework net9.0 -- mssql -t sqlhydra-mssql-nullable-net9.toml

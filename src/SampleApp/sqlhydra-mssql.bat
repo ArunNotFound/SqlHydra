@@ -1,1 +1,1 @@
-dotnet run --project ..\SqlHydra.Cli\SqlHydra.Cli.fsproj --framework net9.0 -- mssql
+dotnet run --project ..\SqlHydra.Cli\SqlHydra.Cli.fsproj --framework net10.0 -- mssql
