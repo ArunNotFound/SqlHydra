@@ -917,3 +917,9 @@ SqlHydra utilizes GitHub Issues and Projects to coordinate planning and developm
 - **Projects**: Our work is organized using [GitHub Projects](https://docs.github.com/en/issues/planning-and-tracking-with-projects/learning-about-projects/about-projects). Projects provide flexible views (Kanban, tables) and customizable charts via insights for tracking data.
 - **Iterations & Milestones**: Upcoming work is grouped into Iterations for short-term planning and [Milestones](https://docs.github.com/en/issues/using-labels-and-milestones-to-track-work/about-milestones) for tracking broad progress across issues and pull requests.
 - **Hierarchy & PRs**: For complex tasks, we leverage parent and sub-issue progress tracking. Pull request fields are used to directly tie reviewer status and PR states into our project boards.
+
+---
+
+## Credits
+
+Guided and implemented by Gemini. Directed by coder.
